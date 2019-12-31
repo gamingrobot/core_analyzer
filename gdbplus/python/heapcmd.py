@@ -5,7 +5,69 @@
 #     based on core_analyzer
 #
 
-import gdb
+try:
+    import gdb
+except ImportError as e:
+    raise ImportError("This script must be run in GDB: ", str(e))
+
+class PrintTopVariableCommand(gdb.Command):
+    '''
+    A GDB command that print variables with most memory usage
+    '''
+    _command = "topvars"
+    _cfthreadno = 0
+    
+    def __init__(self):
+        gdb.Command.__init__(self, self._command, gdb.COMMAND_STACK)
+
+    def invoke(self, argument, from_tty):
+        gdb.write("Find variables with most memory consumption\n")    
+        # Preserve previous selected thread (may be None)
+        orig_thread = gdb.selected_thread()
+        all_threads = gdb.inferiors()[0].threads()
+        num_threads = len(all_threads)
+        gdb.write("There are totally %s threads\n" % num_threads)
+        for thread in gdb.inferiors()[0].threads():
+            # Switch to current thread
+            thread.switch()
+            gdb.write("Thread %d\n" % (thread.num))
+            # Start with the innermost frame
+            frame = gdb.newest_frame()
+            i = 0
+            while frame:
+                try:
+                    frame.select()
+                    gdb.write("frame %d\n" % (i))
+                    block = frame.block()
+                    while block:
+                        #if block.is_global:
+                        #    gdb.write("global\n")
+                        #if block.is_static:
+                        #    gdb.write("static\n")
+                        for symbol in block:
+                            # Old gdb.Type doesn't have attribute 'name'
+                            type_name = symbol.type.tag
+                            if not type_name:
+                                type_name = gdb.execute("whatis %s" % symbol.name, False, True).rstrip()
+                                # remove leading substring 'type = '
+                                type_name = type_name[7:]
+                            if symbol.is_variable:
+                                gdb.write("\tsymbol='%s' type='%s' size='??'" % (symbol.name, type_name))
+                                #if symbol.is_argument:
+                                #    gdb.write(" argument")
+                                #if symbol.is_variable:
+                                #    gdb.write(" variable")
+                                gdb.write("\n")
+                        block = block.superblock
+                except Exception as e:
+                    gdb.write("Exception: %s\n" % str(e))
+                frame = frame.older()
+                i += 1
+
+        # Restore context
+        orig_thread.switch()
+
+PrintTopVariableCommand()
 
 def topblocks(n=10):
     blocks = {}

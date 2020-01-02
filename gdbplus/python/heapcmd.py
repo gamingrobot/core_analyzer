@@ -4,15 +4,53 @@
 # This script is a collection of some useful heap profiling functions
 #     based on core_analyzer
 #
-
+import json
 try:
     import gdb
 except ImportError as e:
     raise ImportError("This script must be run in GDB: ", str(e))
 
+def heap_usage_value(value):
+    if not value:
+        return 0
+    '''
+    Given a gdb.Value object, return the aggregated heap memory usage reachable by this variable
+    '''
+    size = 0
+    count = 0
+
+    print(value)
+    if value.address:
+        addr = long(value.address)
+        print("gdb.heap_walk("+str(addr)+")")
+        blk = gdb.heap_walk(addr)
+        if blk and blk.inuse:
+            print("gdb.heap_walk("+str(addr)+") = " + json.dumps(blk))
+            size += blk.size
+
+    type = value.type
+    if type.code == gdb.TYPE_CODE_PTR:
+        v = value.referenced_value()
+        return heap_usage_value(v)
+    size += type.sizeof
+    return size
+
+def symbol2value(symbol, frame=None):
+    '''
+    Given a gdb.Symbol object, return the aggregated heap memory usage reachable by this variable
+    '''
+    if not symbol.is_variable or not symbol.is_valid():
+        return None
+    try:
+        value = symbol.value(frame)
+    except Exception as e:
+        #print("Exception: " + str(e))
+        return None
+    return value
+
 class PrintTopVariableCommand(gdb.Command):
     '''
-    A GDB command that print variables with most memory usage
+    A GDB command that print variables with most memory heap usage
     '''
     _command = "topvars"
     _cfthreadno = 0
@@ -21,49 +59,73 @@ class PrintTopVariableCommand(gdb.Command):
         gdb.Command.__init__(self, self._command, gdb.COMMAND_STACK)
 
     def invoke(self, argument, from_tty):
-        gdb.write("Find variables with most memory consumption\n")    
+        globalvars = set()
+        globalsyms = []
+        print("Find variables with most memory consumption")
         # Preserve previous selected thread (may be None)
         orig_thread = gdb.selected_thread()
         all_threads = gdb.inferiors()[0].threads()
         num_threads = len(all_threads)
-        gdb.write("There are totally %s threads\n" % num_threads)
+        print("There are totally " + str(num_threads) + " threads")
         for thread in gdb.inferiors()[0].threads():
             # Switch to current thread
             thread.switch()
-            gdb.write("Thread %d\n" % (thread.num))
+            print("Thread " + str(thread.num))
             # Start with the innermost frame
             frame = gdb.newest_frame()
             i = 0
             while frame:
                 try:
                     frame.select()
-                    gdb.write("frame %d\n" % (i))
+                    print("frame [" + str(i) + "] " + frame.name())
                     block = frame.block()
                     while block:
-                        #if block.is_global:
-                        #    gdb.write("global\n")
-                        #if block.is_static:
-                        #    gdb.write("static\n")
                         for symbol in block:
+                            if not symbol.is_variable:
+                                continue
+                            elif block.is_global or block.is_static:
+                                v = symbol2value(symbol, frame)
+                                if v and v.address:
+                                    addr = long(v.address)
+                                    if addr not in globalvars:
+                                        globalvars.add(addr)
+                                        globalsyms.append(symbol)
+                                continue
                             # Old gdb.Type doesn't have attribute 'name'
+                            type = symbol.type
                             type_name = symbol.type.tag
                             if not type_name:
                                 type_name = gdb.execute("whatis %s" % symbol.name, False, True).rstrip()
                                 # remove leading substring 'type = '
                                 type_name = type_name[7:]
-                            if symbol.is_variable:
-                                gdb.write("\tsymbol='%s' type='%s' size='??'" % (symbol.name, type_name))
-                                #if symbol.is_argument:
-                                #    gdb.write(" argument")
-                                #if symbol.is_variable:
-                                #    gdb.write(" variable")
-                                gdb.write("\n")
+                            v = symbol2value(symbol, frame)
+                            print("\t" + "symbol=" + symbol.name + " type=" + type_name + " size=" + str(type.sizeof) \
+                                + " heap=" + str(heap_usage_value(v)))
                         block = block.superblock
-                except Exception as e:
-                    gdb.write("Exception: %s\n" % str(e))
+                except RuntimeError as e:
+                    #print("Exception: " + str(e))
+                    pass
                 frame = frame.older()
                 i += 1
-
+            print("") #end of one thread
+        # print globals after all threads are visited
+        print("")
+        print("Global Vars")
+        gvs = sorted(globalsyms, key=lambda sym: sym.symtab.filename)
+        scopes = set()
+        for symbol in gvs:
+            type = symbol.type
+            type_name = symbol.type.tag
+            if not type_name:
+                type_name = gdb.execute("whatis %s" % symbol.name, False, True).rstrip()
+                # remove leading substring 'type = '
+                type_name = type_name[7:]
+            if symbol.symtab.filename not in scopes:
+                scopes.add(symbol.symtab.filename)
+                print("\t" + symbol.symtab.filename + ":")
+            v = symbol2value(symbol)
+            print("\t\t" + "symbol=" + symbol.name + " type=" + type_name + " size=" + str(type.sizeof) \
+                + " heap=" + str(heap_usage_value(v)))
         # Restore context
         orig_thread.switch()
 

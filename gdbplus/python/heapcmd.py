@@ -12,28 +12,39 @@ except ImportError as e:
 
 def heap_usage_value(value):
     if not value:
-        return 0
+        return 0, 0
     '''
     Given a gdb.Value object, return the aggregated heap memory usage reachable by this variable
     '''
     size = 0
     count = 0
 
-    #print(value)
-    if value.address:
-        addr = long(value.address)
-        #print("gdb.heap_walk("+str(addr)+")")
-        blk = gdb.heap_block(addr)
-        if blk and blk.inuse:
-            #print("gdb.heap_walk("+str(addr)+") = " + json.dumps(blk))
-            size += blk.size
-
     type = value.type
     if type.code == gdb.TYPE_CODE_PTR:
+        addr = long(value)
+        #print(hex(addr))
+        blk = gdb.heap_block(addr)
+        if blk and blk.inuse:
+            size += blk.size
+            count += 1
         v = value.referenced_value()
-        return heap_usage_value(v)
-    size += type.sizeof
-    return size
+        sz, cnt = heap_usage_value(v)
+        size += sz
+        count += cnt
+    elif type.code == gdb.TYPE_CODE_ARRAY:
+        indexes = type.fields()
+        print(indexes)
+        if len(indexes) == 2:
+            print(hex(long(value)))
+            i, index_end = indexes
+            while i < index_end:
+                v = value + i
+                print("i="+str(i)+" addr="+hex(v))
+                sz, cnt = heap_usage_value(v)
+                size += sz
+                count += cnt
+                i += 1
+    return size, count
 
 def symbol2value(symbol, frame=None):
     '''
@@ -99,8 +110,9 @@ class PrintTopVariableCommand(gdb.Command):
                                 # remove leading substring 'type = '
                                 type_name = type_name[7:]
                             v = symbol2value(symbol, frame)
+                            sz, cnt = heap_usage_value(v)
                             print("\t" + "symbol=" + symbol.name + " type=" + type_name + " size=" + str(type.sizeof) \
-                                + " heap=" + str(heap_usage_value(v)))
+                                + " heap=" + str(sz) + " count=" + str(cnt))
                         block = block.superblock
                 except RuntimeError as e:
                     #print("Exception: " + str(e))
@@ -123,11 +135,9 @@ class PrintTopVariableCommand(gdb.Command):
             if symbol.symtab.filename not in scopes:
                 scopes.add(symbol.symtab.filename)
                 print("\t" + symbol.symtab.filename + ":")
-            #v = symbol2value(symbol)
-            #if not v:
-            #    print("failed to get gdb.value")
+            sz, cnt = heap_usage_value(value)
             print("\t\t" + "symbol=" + symbol.name + " type=" + type_name + " size=" + str(type.sizeof) \
-                + " heap=" + str(heap_usage_value(value)))
+                + " heap=" + str(sz) + " count=" + str(cnt))
         # Restore context
         orig_thread.switch()
 

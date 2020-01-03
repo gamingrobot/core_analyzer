@@ -19,13 +19,13 @@ def heap_usage_value(value):
     size = 0
     count = 0
 
-    print(value)
+    #print(value)
     if value.address:
         addr = long(value.address)
-        print("gdb.heap_walk("+str(addr)+")")
-        blk = gdb.heap_walk(addr)
+        #print("gdb.heap_walk("+str(addr)+")")
+        blk = gdb.heap_block(addr)
         if blk and blk.inuse:
-            print("gdb.heap_walk("+str(addr)+") = " + json.dumps(blk))
+            #print("gdb.heap_walk("+str(addr)+") = " + json.dumps(blk))
             size += blk.size
 
     type = value.type
@@ -59,8 +59,8 @@ class PrintTopVariableCommand(gdb.Command):
         gdb.Command.__init__(self, self._command, gdb.COMMAND_STACK)
 
     def invoke(self, argument, from_tty):
-        globalvars = set()
-        globalsyms = []
+        gv_addrs = set()
+        gvs = []
         print("Find variables with most memory consumption")
         # Preserve previous selected thread (may be None)
         orig_thread = gdb.selected_thread()
@@ -87,9 +87,9 @@ class PrintTopVariableCommand(gdb.Command):
                                 v = symbol2value(symbol, frame)
                                 if v and v.address:
                                     addr = long(v.address)
-                                    if addr not in globalvars:
-                                        globalvars.add(addr)
-                                        globalsyms.append(symbol)
+                                    if addr not in gv_addrs:
+                                        gv_addrs.add(addr)
+                                        gvs.append((symbol, v))
                                 continue
                             # Old gdb.Type doesn't have attribute 'name'
                             type = symbol.type
@@ -111,9 +111,9 @@ class PrintTopVariableCommand(gdb.Command):
         # print globals after all threads are visited
         print("")
         print("Global Vars")
-        gvs = sorted(globalsyms, key=lambda sym: sym.symtab.filename)
+        sorted_gvs = sorted(gvs, key=lambda gv: gv[0].symtab.filename)
         scopes = set()
-        for symbol in gvs:
+        for (symbol, value) in gvs:
             type = symbol.type
             type_name = symbol.type.tag
             if not type_name:
@@ -123,9 +123,11 @@ class PrintTopVariableCommand(gdb.Command):
             if symbol.symtab.filename not in scopes:
                 scopes.add(symbol.symtab.filename)
                 print("\t" + symbol.symtab.filename + ":")
-            v = symbol2value(symbol)
+            #v = symbol2value(symbol)
+            #if not v:
+            #    print("failed to get gdb.value")
             print("\t\t" + "symbol=" + symbol.name + " type=" + type_name + " size=" + str(type.sizeof) \
-                + " heap=" + str(heap_usage_value(v)))
+                + " heap=" + str(heap_usage_value(value)))
         # Restore context
         orig_thread.switch()
 

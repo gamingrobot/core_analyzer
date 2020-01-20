@@ -59,11 +59,13 @@ def heap_usage_value(value, visited_values):
         #for m in fields:
         #    print("\t" + m.name)
         for member in fields:
+            if not hasattr(member, "type"):
+                continue
             mtype = member.type
             if mtype.sizeof >= 8 \
                 and (mtype.code == gdb.TYPE_CODE_PTR \
                     or mtype.code == gdb.TYPE_CODE_REF \
-                    or mtype.code == gdb.TYPE_CODE_RVALUE_REF \
+                    #or mtype.code == gdb.TYPE_CODE_RVALUE_REF \
                     or mtype.code == gdb.TYPE_CODE_ARRAY \
                     or mtype.code == gdb.TYPE_CODE_STRUCT \
                     or mtype.code == gdb.TYPE_CODE_UNION \
@@ -107,72 +109,79 @@ class PrintTopVariableCommand(gdb.Command):
         gv_addrs = set()
         gvs = []
         print("Find variables with most memory consumption")
-        # Preserve previous selected thread (may be None)
-        orig_thread = gdb.selected_thread()
-        all_threads = gdb.inferiors()[0].threads()
-        num_threads = len(all_threads)
-        print("There are totally " + str(num_threads) + " threads")
-        # Traverse all threads
-        for thread in gdb.inferiors()[0].threads():
-            #if thread.num != 2:
-            #    continue
-            # Switch to current thread
-            thread.switch()
-            print("Thread " + str(thread.num))
-            # Traverse all frames starting with the innermost
-            frame = gdb.newest_frame()
-            i = 0
-            while frame:
-                try:
-                    frame.select()
-                    print("frame [" + str(i) + "] " + frame.name())
-                    # Traverse all blocks
+        if len(argument):
+            for arg in argument:
+                print(arg)
+        else:
+            # Preserve previous selected thread (may be None)
+            orig_thread = gdb.selected_thread()
+            all_threads = gdb.inferiors()[0].threads()
+            num_threads = len(all_threads)
+            print("There are totally " + str(num_threads) + " threads")
+            # Traverse all threads
+            for thread in gdb.inferiors()[0].threads():
+                if thread.num != 1:
+                    continue
+                # Switch to current thread
+                thread.switch()
+                print("Thread " + str(thread.num))
+                # Traverse all frames starting with the innermost
+                frame = gdb.newest_frame()
+                i = 0
+                while frame:
                     try:
-                        # this method may throw if there is no debugging info in the block
-                        block = frame.block()
-                    except Exception:
-                        block = None
-                    while block:
-                        # Traverse all symbols in the block
-                        for symbol in block:
-                            # Ignore other symbols except variables
-                            if not symbol.is_variable:
-                                continue
-                            # Global symbols are processed later
-                            elif block.is_global or block.is_static:
+                        frame.select()
+                        fname = frame.name()
+                        if not fname:
+                            fname = "??"
+                        print("frame [" + str(i) + "] " + fname)
+                        # Traverse all blocks
+                        try:
+                            # this method may throw if there is no debugging info in the block
+                            block = frame.block()
+                        except Exception:
+                            block = None
+                        while block:
+                            # Traverse all symbols in the block
+                            for symbol in block:
+                                # Ignore other symbols except variables
+                                if not symbol.is_variable:
+                                    continue
+                                # Global symbols are processed later
+                                elif block.is_global or block.is_static:
+                                    v = symbol2value(symbol, frame)
+                                    if v is not None and v.address:
+                                        addr = long(v.address)
+                                        if addr not in gv_addrs:
+                                            gv_addrs.add(addr)
+                                            gvs.append((symbol, v))
+                                    continue
+                                # Local variable
+                                #print("symbol " + symbol.name)
+                                # Old gdb.Type doesn't have attribute 'name'
+                                type = symbol.type
+                                type_name = symbol.type.tag
+                                if not type_name:
+                                    try:
+                                        type_name = gdb.execute("whatis " + symbol.name, False, True).rstrip()
+                                        # remove leading substring 'type = '
+                                        type_name = type_name[7:]
+                                    except RuntimeError as e:
+                                        print("RuntimeError: " + str(e))
+                                # Convert to gdb.Value
                                 v = symbol2value(symbol, frame)
-                                if v is not None and v.address:
-                                    addr = long(v.address)
-                                    if addr not in gv_addrs:
-                                        gv_addrs.add(addr)
-                                        gvs.append((symbol, v))
-                                continue
-                            # Local variable
-                            #print("symbol " + symbol.name)
-                            # Old gdb.Type doesn't have attribute 'name'
-                            type = symbol.type
-                            type_name = symbol.type.tag
-                            if not type_name:
-                                try:
-                                    type_name = gdb.execute("whatis " + symbol.name, False, True).rstrip()
-                                    # remove leading substring 'type = '
-                                    type_name = type_name[7:]
-                                except RuntimeError as e:
-                                    print("RuntimeError: " + str(e))
-                            # Convert to gdb.Value
-                            v = symbol2value(symbol, frame)
-                            visited_values = set()
-                            sz, cnt = heap_usage_value(v, visited_values)
-                            print("\t" + "symbol=" + symbol.name + " type=" + type_name + " size=" + str(type.sizeof) \
-                                + " heap=" + str(sz) + " count=" + str(cnt))
-                        block = block.superblock
-                except Exception as e:
-                    print("Exception: " + str(e))
-                    traceback.print_exc()
-                    pass
-                frame = frame.older()
-                i += 1
-            print("") #end of one thread
+                                visited_values = set()
+                                sz, cnt = heap_usage_value(v, visited_values)
+                                print("\t" + "symbol=" + symbol.name + " type=" + type_name + " size=" + str(type.sizeof) \
+                                    + " heap=" + str(sz) + " count=" + str(cnt))
+                            block = block.superblock
+                    except Exception as e:
+                        print("Exception: " + str(e))
+                        traceback.print_exc()
+                        pass
+                    frame = frame.older()
+                    i += 1
+                print("") #end of one thread
         # print globals after all threads are visited
         print("")
         print("Global Vars")

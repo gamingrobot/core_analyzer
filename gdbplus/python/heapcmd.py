@@ -16,6 +16,28 @@ type_code_des = {
   gdb.TYPE_CODE_PTR: 'gdb.TYPE_CODE_PTR',
   gdb.TYPE_CODE_PTR: 'gdb.TYPE_CODE_ARRAY',
   gdb.TYPE_CODE_STRUCT: 'gdb.TYPE_CODE_STRUCT',
+  gdb.TYPE_CODE_UNION: 'gdb.TYPE_CODE_UNION',
+  gdb.TYPE_CODE_ENUM: 'gdb.TYPE_CODE_ENUM',
+  gdb.TYPE_CODE_FLAGS: 'gdb.TYPE_CODE_FLAGS',
+  gdb.TYPE_CODE_FUNC: 'gdb.TYPE_CODE_FUNC',
+  gdb.TYPE_CODE_FUNC: 'gdb.TYPE_CODE_FUNC',
+  gdb.TYPE_CODE_FLT: 'gdb.TYPE_CODE_FLT',
+  gdb.TYPE_CODE_VOID: 'gdb.TYPE_CODE_VOID',
+  gdb.TYPE_CODE_RANGE: 'gdb.TYPE_CODE_RANGE',
+  gdb.TYPE_CODE_STRING: 'gdb.TYPE_CODE_STRING',
+  gdb.TYPE_CODE_BITSTRING: 'gdb.TYPE_CODE_BITSTRING',
+  gdb.TYPE_CODE_ERROR: 'gdb.TYPE_CODE_ERROR',
+  gdb.TYPE_CODE_METHOD: 'gdb.TYPE_CODE_METHOD',
+  gdb.TYPE_CODE_METHODPTR: 'gdb.TYPE_CODE_METHODPTR',
+  gdb.TYPE_CODE_MEMBERPTR: 'gdb.TYPE_CODE_MEMBERPTR',
+  gdb.TYPE_CODE_REF: 'gdb.TYPE_CODE_REF',
+  gdb.TYPE_CODE_CHAR: 'gdb.TYPE_CODE_CHAR',
+  gdb.TYPE_CODE_BOOL: 'gdb.TYPE_CODE_BOOL',
+  gdb.TYPE_CODE_COMPLEX: 'gdb.TYPE_CODE_COMPLEX',
+  gdb.TYPE_CODE_TYPEDEF: 'gdb.TYPE_CODE_TYPEDEF',
+  gdb.TYPE_CODE_NAMESPACE: 'gdb.TYPE_CODE_NAMESPACE',
+  gdb.TYPE_CODE_DECFLOAT: 'gdb.TYPE_CODE_DECFLOAT',
+  gdb.TYPE_CODE_INTERNAL_FUNCTION: 'gdb.TYPE_CODE_INTERNAL_FUNCTION',
 }
 
 def heap_usage_value(name, value, visited_values):
@@ -79,7 +101,7 @@ def heap_usage_value(name, value, visited_values):
                     or mtype.code == gdb.TYPE_CODE_STRUCT \
                     or mtype.code == gdb.TYPE_CODE_UNION \
                     or mtype.code == gdb.TYPE_CODE_TYPEDEF):
-                print(name + "[" + member.name + "]" + " type.code=" + str(mtype.code))
+                print(name + "[" + member.name + "]" + " type.code=" + type_code_des[mtype.code])
                 if val_addr == long(value[member].address):
                     # first field of a struct has the same value.address as
                     # the struct itself, we have to remove it from the set

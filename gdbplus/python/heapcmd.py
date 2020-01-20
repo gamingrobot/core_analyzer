@@ -96,6 +96,17 @@ def symbol2value(symbol, frame=None):
         print("Failed symbol.value: " + str(e))
         return None
 
+def get_typename(type, expr):
+    type_name = type.tag
+    if not type_name:
+        try:
+            type_name = gdb.execute("whatis " + expr, False, True).rstrip()
+            # remove leading substring 'type = '
+            type_name = type_name[7:]
+        except RuntimeError as e:
+            print("RuntimeError: " + str(e))
+    return type_name
+
 class PrintTopVariableCommand(gdb.Command):
     '''
     A GDB command that print variables with most memory heap usage
@@ -118,7 +129,16 @@ class PrintTopVariableCommand(gdb.Command):
                 #parser = argparse.ArgumentParser(description='Expression Parser')
                 #parser.add_argument("param", help='parameters')
                 #args = parser.parse_args(tokens)
-                print(tokens)
+                #print(tokens)
+                for expr in tokens:
+                    v = gdb.parse_and_eval(expr)
+                    if v:
+                        visited_values = set()
+                        type = v.type
+                        type_name = get_typename(type, expr)
+                        sz, cnt = heap_usage_value(v, visited_values)
+                        print("\t" + "symbol=" + exp + " type=" + type_name + " size=" + str(type.sizeof) \
+                            + " heap=" + str(sz) + " count=" + str(cnt))
                 return
 
         # Preserve previous selected thread (may be None)
@@ -168,14 +188,7 @@ class PrintTopVariableCommand(gdb.Command):
                             #print("symbol " + symbol.name)
                             # Old gdb.Type doesn't have attribute 'name'
                             type = symbol.type
-                            type_name = symbol.type.tag
-                            if not type_name:
-                                try:
-                                    type_name = gdb.execute("whatis " + symbol.name, False, True).rstrip()
-                                    # remove leading substring 'type = '
-                                    type_name = type_name[7:]
-                                except RuntimeError as e:
-                                    print("RuntimeError: " + str(e))
+                            type_name = get_typename(type, symbol.name)
                             # Convert to gdb.Value
                             v = symbol2value(symbol, frame)
                             visited_values = set()
@@ -200,11 +213,7 @@ class PrintTopVariableCommand(gdb.Command):
         scopes = set()
         for (symbol, value) in sorted_gvs:
             type = symbol.type
-            type_name = symbol.type.tag
-            if not type_name:
-                type_name = gdb.execute("whatis %s" % symbol.name, False, True).rstrip()
-                # remove leading substring 'type = '
-                type_name = type_name[7:]
+            type_name = get_typename(type, symbol.name)
             if symbol.symtab.filename not in scopes:
                 scopes.add(symbol.symtab.filename)
                 print("\t" + symbol.symtab.filename + ":")

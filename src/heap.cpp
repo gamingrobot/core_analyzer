@@ -813,9 +813,11 @@ bool biggest_heap_owners_generic(unsigned int num, bool all_reachable_blocks)
 			{
 				tid = get_thread_id (segment);
 				// allocate register value buffer for once
-				if (!nregs && !regs_buf)
+				if (!nregs || !regs_buf)
 				{
 					nregs = read_registers (NULL, NULL, 0);
+					if (regs_buf)
+						free(regs_buf);
 					if (nregs)
 						regs_buf = (struct reg_value*) malloc(nregs * sizeof(struct reg_value));
 				}

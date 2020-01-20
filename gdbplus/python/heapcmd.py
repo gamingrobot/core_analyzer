@@ -137,7 +137,7 @@ class PrintTopVariableCommand(gdb.Command):
                         type = v.type
                         type_name = get_typename(type, expr)
                         sz, cnt = heap_usage_value(v, visited_values)
-                        print("\t" + "symbol=" + exp + " type=" + type_name + " size=" + str(type.sizeof) \
+                        print("\t" + "symbol=" + expr + " type=" + type_name + " size=" + str(type.sizeof) \
                             + " heap=" + str(sz) + " count=" + str(cnt))
                 return
 

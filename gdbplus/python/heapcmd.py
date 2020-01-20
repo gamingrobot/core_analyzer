@@ -12,7 +12,13 @@ try:
 except ImportError as e:
     raise ImportError("This script must be run in GDB: ", str(e))
 
-def heap_usage_value(value, visited_values):
+type_code_des = {
+  gdb.TYPE_CODE_PTR: 'gdb.TYPE_CODE_PTR',
+  gdb.TYPE_CODE_PTR: 'gdb.TYPE_CODE_ARRAY',
+  gdb.TYPE_CODE_STRUCT: 'gdb.TYPE_CODE_STRUCT',
+}
+
+def heap_usage_value(name, value, visited_values):
     if value is None or not value.address:
         return 0, 0
     val_addr = long(value.address)
@@ -25,7 +31,7 @@ def heap_usage_value(value, visited_values):
     size = 0
     count = 0
 
-    type = value.type
+    type = gdb.types.get_basic_type(value.type)
     if type.code == gdb.TYPE_CODE_PTR:
         addr = long(value)
         #print(hex(addr))
@@ -41,7 +47,7 @@ def heap_usage_value(value, visited_values):
             #    print("target_type:" + target_type.name)
             #print("target_size:" + str(target_type.sizeof))
             v = value.referenced_value()
-            sz, cnt = heap_usage_value(v, visited_values)
+            sz, cnt = heap_usage_value(name + '->', v, visited_values)
             size += sz
             count += cnt
     elif type.code == gdb.TYPE_CODE_ARRAY:
@@ -52,13 +58,15 @@ def heap_usage_value(value, visited_values):
             v = value[i]
             if val_addr == long(v.address):
                 visited_values.discard(val_addr)
-            sz, cnt = heap_usage_value(v, visited_values)
+            sz, cnt = heap_usage_value(name + '[' + str(i) + ']', v, visited_values)
             size += sz
             count += cnt
     elif type.code == gdb.TYPE_CODE_STRUCT:
         fields = type.fields()
-        #for m in fields:
-        #    print("\t" + m.name)
+        fieldnames = []
+        for m in fields:
+            fieldnames.append(m.name)
+        print(name + " => " + str(fieldnames))
         for member in fields:
             if not hasattr(member, "type"):
                 continue
@@ -71,14 +79,14 @@ def heap_usage_value(value, visited_values):
                     or mtype.code == gdb.TYPE_CODE_STRUCT \
                     or mtype.code == gdb.TYPE_CODE_UNION \
                     or mtype.code == gdb.TYPE_CODE_TYPEDEF):
-                #print("data member [" + member.name + "]" + " type.code=" + str(mtype.code))
+                print(name + "[" + member.name + "]" + " type.code=" + str(mtype.code))
                 if val_addr == long(value[member].address):
                     # first field of a struct has the same value.address as
                     # the struct itself, we have to remove it from the set
                     # TODO ensure the first data member is NOT a pointer and points
                     #      to the struct itself.
                     visited_values.discard(val_addr)
-                sz, cnt = heap_usage_value(value[member], visited_values)
+                sz, cnt = heap_usage_value(name + '.' + member.name, value[member], visited_values)
                 size += sz
                 count += cnt
 
@@ -136,7 +144,7 @@ class PrintTopVariableCommand(gdb.Command):
                         visited_values = set()
                         type = v.type
                         type_name = get_typename(type, expr)
-                        sz, cnt = heap_usage_value(v, visited_values)
+                        sz, cnt = heap_usage_value(expr, v,visited_values)
                         print("\t" + "symbol=" + expr + " type=" + type_name + " size=" + str(type.sizeof) \
                             + " heap=" + str(sz) + " count=" + str(cnt))
                 return
@@ -192,7 +200,7 @@ class PrintTopVariableCommand(gdb.Command):
                             # Convert to gdb.Value
                             v = symbol2value(symbol, frame)
                             visited_values = set()
-                            sz, cnt = heap_usage_value(v, visited_values)
+                            sz, cnt = heap_usage_value(symbol.name, v, visited_values)
                             print("\t" + "symbol=" + symbol.name + " type=" + type_name + " size=" + str(type.sizeof) \
                                 + " heap=" + str(sz) + " count=" + str(cnt))
                         block = block.superblock
@@ -218,7 +226,7 @@ class PrintTopVariableCommand(gdb.Command):
                 scopes.add(symbol.symtab.filename)
                 print("\t" + symbol.symtab.filename + ":")
             visited_values = set()
-            sz, cnt = heap_usage_value(value, visited_values)
+            sz, cnt = heap_usage_value(symbol.name, value, visited_values)
             print("\t\t" + "symbol=" + symbol.name + " type=" + type_name + " size=" + str(type.sizeof) \
                 + " heap=" + str(sz) + " count=" + str(cnt))
 

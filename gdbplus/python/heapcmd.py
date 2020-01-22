@@ -61,13 +61,9 @@ def heap_usage_value(name, value, visited_values):
         if blk and blk.inuse:
             size += blk.size
             count += 1
+            #print("heap block " + hex(blk.address) + " size=" + str(blk.size))
         target_type = type.target()
         if target_type.sizeof >= 8:
-            #if target_type.tag:
-            #    print("target_type:" + target_type.tag)
-            #elif target_type.name:
-            #    print("target_type:" + target_type.name)
-            #print("target_size:" + str(target_type.sizeof))
             v = value.referenced_value()
             sz, cnt = heap_usage_value(name + '->', v, visited_values)
             size += sz
@@ -88,7 +84,7 @@ def heap_usage_value(name, value, visited_values):
         fieldnames = []
         for m in fields:
             fieldnames.append(m.name)
-        print(name + " => " + str(fieldnames))
+        #print(str(fieldnames))
         for member in fields:
             if not hasattr(member, "type"):
                 continue
@@ -108,7 +104,7 @@ def heap_usage_value(name, value, visited_values):
                     # TODO ensure the first data member is NOT a pointer and points
                     #      to the struct itself.
                     visited_values.discard(val_addr)
-                sz, cnt = heap_usage_value(name + '.' + member.name, value[member], visited_values)
+                sz, cnt = heap_usage_value(name + '[' + member.name + ']', value[member], visited_values)
                 size += sz
                 count += cnt
 
@@ -134,7 +130,9 @@ def get_typename(type, expr):
             # remove leading substring 'type = '
             type_name = type_name[7:]
         except RuntimeError as e:
-            print("RuntimeError: " + str(e))
+            #print("RuntimeError: " + str(e))
+            #type_name = "unknown"
+            pass
     return type_name
 
 class PrintTopVariableCommand(gdb.Command):
@@ -167,7 +165,7 @@ class PrintTopVariableCommand(gdb.Command):
                         type = v.type
                         type_name = get_typename(type, expr)
                         sz, cnt = heap_usage_value(expr, v,visited_values)
-                        print("\t" + "symbol=" + expr + " type=" + type_name + " size=" + str(type.sizeof) \
+                        print("expr=" + expr + " type=" + type_name + " size=" + str(type.sizeof) \
                             + " heap=" + str(sz) + " count=" + str(cnt))
                 return
 
@@ -178,7 +176,7 @@ class PrintTopVariableCommand(gdb.Command):
         print("There are totally " + str(num_threads) + " threads")
         # Traverse all threads
         for thread in gdb.inferiors()[0].threads():
-            if thread.num != 1:
+            if thread.num != 586:
                 continue
             # Switch to current thread
             thread.switch()
@@ -205,6 +203,12 @@ class PrintTopVariableCommand(gdb.Command):
                             # Ignore other symbols except variables
                             if not symbol.is_variable:
                                 continue
+                            #if not symbol.is_valid():
+                            #    continue
+                            #if symbol.addr_class == gdb.SYMBOL_LOC_OPTIMIZED_OUT:
+                            #    continue
+                            #if not symbol.type:
+                            #    continue
                             # Global symbols are processed later
                             elif block.is_global or block.is_static:
                                 v = symbol2value(symbol, frame)
@@ -219,6 +223,8 @@ class PrintTopVariableCommand(gdb.Command):
                             # Old gdb.Type doesn't have attribute 'name'
                             type = symbol.type
                             type_name = get_typename(type, symbol.name)
+                            if not type_name:
+                                continue
                             # Convert to gdb.Value
                             v = symbol2value(symbol, frame)
                             visited_values = set()
@@ -236,6 +242,7 @@ class PrintTopVariableCommand(gdb.Command):
         # Restore context
         orig_thread.switch() #End of all threads
 
+        return
         # print globals after all threads are visited
         print("")
         print("Global Vars")

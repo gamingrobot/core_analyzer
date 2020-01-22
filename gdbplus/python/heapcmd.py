@@ -145,30 +145,28 @@ class PrintTopVariableCommand(gdb.Command):
     def __init__(self):
         gdb.Command.__init__(self, self._command, gdb.COMMAND_STACK)
 
-    def invoke(self, argument, from_tty):
+    def calc_input_vars(self, argument):
+        tokens = argument.split()
+        if not len(tokens):
+            print("Invalid argument: [" + argument + "]")
+            return
+        #parser = argparse.ArgumentParser(description='Expression Parser')
+        #parser.add_argument("param", help='parameters')
+        #args = parser.parse_args(tokens)
+        #print(tokens)
+        for expr in tokens:
+            v = gdb.parse_and_eval(expr)
+            if v:
+                visited_values = set()
+                type = v.type
+                type_name = get_typename(type, expr)
+                sz, cnt = heap_usage_value(expr, v,visited_values)
+                print("expr=" + expr + " type=" + type_name + " size=" + str(type.sizeof) \
+                    + " heap=" + str(sz) + " count=" + str(cnt))
+
+    def calc_all_vars(self):
         gv_addrs = set()
         gvs = []
-        print("Find variables with most memory consumption")
-
-        # Evaluate specified expressions
-        if argument:
-            tokens = argument.split()
-            if len(tokens):
-                #parser = argparse.ArgumentParser(description='Expression Parser')
-                #parser.add_argument("param", help='parameters')
-                #args = parser.parse_args(tokens)
-                #print(tokens)
-                for expr in tokens:
-                    v = gdb.parse_and_eval(expr)
-                    if v:
-                        visited_values = set()
-                        type = v.type
-                        type_name = get_typename(type, expr)
-                        sz, cnt = heap_usage_value(expr, v,visited_values)
-                        print("expr=" + expr + " type=" + type_name + " size=" + str(type.sizeof) \
-                            + " heap=" + str(sz) + " count=" + str(cnt))
-                return
-
         # Preserve previous selected thread (may be None)
         orig_thread = gdb.selected_thread()
         all_threads = gdb.inferiors()[0].threads()
@@ -258,6 +256,20 @@ class PrintTopVariableCommand(gdb.Command):
             sz, cnt = heap_usage_value(symbol.name, value, visited_values)
             print("\t\t" + "symbol=" + symbol.name + " type=" + type_name + " size=" + str(type.sizeof) \
                 + " heap=" + str(sz) + " count=" + str(cnt))
+
+    def invoke(self, argument, from_tty):
+        print("Find variables with most memory consumption")
+
+        try:
+            if argument:
+                # Evaluate specified expressions
+                self.calc_input_vars(argument)
+            else:
+                # Traverse all local/global variables
+                self.calc_all_vars()
+        except Exception as e:
+            print("Exception: " + str(e))
+            traceback.print_exc()
 
 PrintTopVariableCommand()
 

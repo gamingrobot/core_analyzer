@@ -62,12 +62,12 @@ def heap_usage_value(name, value, visited_values):
             size += blk.size
             count += 1
             #print("heap block " + hex(blk.address) + " size=" + str(blk.size))
-        target_type = type.target()
-        if target_type.sizeof >= 8:
-            v = value.referenced_value()
-            sz, cnt = heap_usage_value(name + '->', v, visited_values)
-            size += sz
-            count += cnt
+            target_type = type.target()
+            if target_type.sizeof >= 8:
+                v = value.referenced_value()
+                sz, cnt = heap_usage_value(name + '->', v, visited_values)
+                size += sz
+                count += cnt
     elif type.code == gdb.TYPE_CODE_ARRAY:
         istart, iend = type.range()
         #ptr_to_elt_type = type.target().target().pointer()
@@ -81,12 +81,15 @@ def heap_usage_value(name, value, visited_values):
             count += cnt
     elif type.code == gdb.TYPE_CODE_STRUCT:
         fields = type.fields()
-        fieldnames = []
-        for m in fields:
-            fieldnames.append(m.name)
+        #fieldnames = []
+        #for m in fields:
+        #    fieldnames.append(m.name)
         #print(str(fieldnames))
         for member in fields:
             if not hasattr(member, "type"):
+                continue
+            memval = value[member]
+            if not memval or not memval.address:
                 continue
             mtype = member.type
             if mtype.sizeof >= 8 \
@@ -97,14 +100,14 @@ def heap_usage_value(name, value, visited_values):
                     or mtype.code == gdb.TYPE_CODE_STRUCT \
                     or mtype.code == gdb.TYPE_CODE_UNION \
                     or mtype.code == gdb.TYPE_CODE_TYPEDEF):
-                print(name + "[" + member.name + "]" + " type.code=" + type_code_des[mtype.code])
-                if val_addr == long(value[member].address):
+                #print(name + "[" + member.name + "]" + " type.code=" + type_code_des[mtype.code])
+                if val_addr == long(memval.address):
                     # first field of a struct has the same value.address as
                     # the struct itself, we have to remove it from the set
                     # TODO ensure the first data member is NOT a pointer and points
                     #      to the struct itself.
                     visited_values.discard(val_addr)
-                sz, cnt = heap_usage_value(name + '[' + member.name + ']', value[member], visited_values)
+                sz, cnt = heap_usage_value(name + '[' + member.name + ']', memval, visited_values)
                 size += sz
                 count += cnt
 
@@ -174,8 +177,8 @@ class PrintTopVariableCommand(gdb.Command):
         print("There are totally " + str(num_threads) + " threads")
         # Traverse all threads
         for thread in gdb.inferiors()[0].threads():
-            if thread.num != 586:
-                continue
+            #if thread.num != 586:
+            #    continue
             # Switch to current thread
             thread.switch()
             print("Thread " + str(thread.num))
@@ -240,7 +243,6 @@ class PrintTopVariableCommand(gdb.Command):
         # Restore context
         orig_thread.switch() #End of all threads
 
-        return
         # print globals after all threads are visited
         print("")
         print("Global Vars")
@@ -254,6 +256,9 @@ class PrintTopVariableCommand(gdb.Command):
                 print("\t" + symbol.symtab.filename + ":")
             visited_values = set()
             sz, cnt = heap_usage_value(symbol.name, value, visited_values)
+            if sz is None or cnt is None:
+                print("\t\t" + "symbol=" + symbol.name + " type=" + type_name + " FAIL")
+                continue
             print("\t\t" + "symbol=" + symbol.name + " type=" + type_name + " size=" + str(type.sizeof) \
                 + " heap=" + str(sz) + " count=" + str(cnt))
 

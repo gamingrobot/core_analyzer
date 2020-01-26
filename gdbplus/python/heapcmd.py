@@ -41,12 +41,15 @@ type_code_des = {
 }
 
 def heap_usage_value(name, value, visited_values):
-    if value is None or not value.address:
+    #print("Enter heap_usage_value: " + name)
+    if value is None:
         return 0, 0
-    val_addr = long(value.address)
-    if val_addr in visited_values:
-        return 0, 0
-    visited_values.add(val_addr)
+    if value.address:
+        parent_addr = long(value.address)
+        if parent_addr in visited_values:
+            #print("heap_usage_value value is repeated: " + name)
+            return 0, 0
+        visited_values.add(parent_addr)
     '''
     Given a gdb.Value object, return the aggregated heap memory usage reachable by this variable
     '''
@@ -65,7 +68,7 @@ def heap_usage_value(name, value, visited_values):
             target_type = type.target()
             if target_type.sizeof >= 8:
                 v = value.referenced_value()
-                sz, cnt = heap_usage_value(name + '->', v, visited_values)
+                sz, cnt = heap_usage_value("*(" + name + ")", v, visited_values)
                 size += sz
                 count += cnt
     elif type.code == gdb.TYPE_CODE_ARRAY:
@@ -74,8 +77,8 @@ def heap_usage_value(name, value, visited_values):
         #ptr_to_first = value.cast(ptr_to_elt_type)
         for i in range(istart, iend+1):
             v = value[i]
-            if val_addr == long(v.address):
-                visited_values.discard(val_addr)
+            if parent_addr == long(v.address):
+                visited_values.discard(parent_addr)
             sz, cnt = heap_usage_value(name + '[' + str(i) + ']', v, visited_values)
             size += sz
             count += cnt
@@ -87,9 +90,14 @@ def heap_usage_value(name, value, visited_values):
         #print(str(fieldnames))
         for member in fields:
             if not hasattr(member, "type"):
+                #print(name + "[" + member.name + "] has no type")
                 continue
+            #if not hasattr(value, member.name):
+            #    print(name + "has no attr [" + member.name + "]")
+            #    continue
             memval = value[member]
             if not memval or not memval.address:
+                #print(name + "[" + member.name + "] has no value")
                 continue
             mtype = member.type
             if mtype.sizeof >= 8 \
@@ -101,12 +109,12 @@ def heap_usage_value(name, value, visited_values):
                     or mtype.code == gdb.TYPE_CODE_UNION \
                     or mtype.code == gdb.TYPE_CODE_TYPEDEF):
                 #print(name + "[" + member.name + "]" + " type.code=" + type_code_des[mtype.code])
-                if val_addr == long(memval.address):
+                if parent_addr == long(memval.address):
                     # first field of a struct has the same value.address as
                     # the struct itself, we have to remove it from the set
                     # TODO ensure the first data member is NOT a pointer and points
                     #      to the struct itself.
-                    visited_values.discard(val_addr)
+                    visited_values.discard(parent_addr)
                 sz, cnt = heap_usage_value(name + '[' + member.name + ']', memval, visited_values)
                 size += sz
                 count += cnt
@@ -115,12 +123,15 @@ def heap_usage_value(name, value, visited_values):
 
 def symbol2value(symbol, frame=None):
     '''
-    Given a gdb.Symbol object, return the aggregated heap memory usage reachable by this variable
+    Given a gdb.Symbol object, return the corresponding gdb.Value object
     '''
-    if not symbol.is_variable or not symbol.is_valid():
+    if not symbol.is_valid():
         return None
     try:
-        return symbol.value(frame)
+        if frame:
+            return symbol.value(frame)
+        else:
+            return symbol.value()
     except Exception as e:
         print("Failed symbol.value: " + str(e))
         return None
@@ -155,30 +166,45 @@ class PrintTopVariableCommand(gdb.Command):
             return
         #parser = argparse.ArgumentParser(description='Expression Parser')
         #parser.add_argument("param", help='parameters')
-        #args = parser.parse_args(tokens)
+        #tokens = parser.parse_args(argumenti.split())
         #print(tokens)
         for expr in tokens:
+            #print("processing " + expr)
             v = gdb.parse_and_eval(expr)
+            if not v:
+                #symbol = gdb.lookup_symbol(expr)
+                symbol = gdb.lookup_global_symbol(expr, gdb.SYMBOL_VAR_DOMAIN)
+                if symbol:
+                    v = symbol2value(symbol)
+                    if not v:
+                        print("symbol2value failed for: " + symbol.name)
+                else:
+                    print("gdb.lookup_global_symbol failed for: " + expr)
             if v:
                 visited_values = set()
+                sz, cnt = heap_usage_value(expr, v, visited_values)
                 type = v.type
                 type_name = get_typename(type, expr)
-                sz, cnt = heap_usage_value(expr, v,visited_values)
                 print("expr=" + expr + " type=" + type_name + " size=" + str(type.sizeof) \
                     + " heap=" + str(sz) + " count=" + str(cnt))
+            else:
+                print("gdb.parse_and_eval failed for: " + expr)
 
     def calc_all_vars(self):
+        all_addrs = set()
         gv_addrs = set()
         gvs = []
-        # Preserve previous selected thread (may be None)
+        total_bytes = 0
+        total_count = 0
+        # Remember previous selected thread (may be None)
         orig_thread = gdb.selected_thread()
         all_threads = gdb.inferiors()[0].threads()
         num_threads = len(all_threads)
         print("There are totally " + str(num_threads) + " threads")
         # Traverse all threads
         for thread in gdb.inferiors()[0].threads():
-            #if thread.num != 586:
-            #    continue
+            if thread.num != 4:
+                continue
             # Switch to current thread
             thread.switch()
             print("Thread " + str(thread.num))
@@ -198,11 +224,14 @@ class PrintTopVariableCommand(gdb.Command):
                         block = frame.block()
                     except Exception:
                         block = None
+                    # Traverse all syntactic blocks
                     while block:
                         # Traverse all symbols in the block
                         for symbol in block:
+                            #print("symbol " + symbol.name)
                             # Ignore other symbols except variables
-                            if not symbol.is_variable:
+                            if not symbol.is_variable and not symbol.is_argument:
+                                #print("symbol [" + symbol.name + "]" + " is not var or arg")
                                 continue
                             #if not symbol.is_valid():
                             #    continue
@@ -213,24 +242,36 @@ class PrintTopVariableCommand(gdb.Command):
                             # Global symbols are processed later
                             elif block.is_global or block.is_static:
                                 v = symbol2value(symbol, frame)
-                                if v is not None and v.address:
+                                if v and v.address:
                                     addr = long(v.address)
                                     if addr not in gv_addrs:
                                         gv_addrs.add(addr)
                                         gvs.append((symbol, v))
+                                    all_addrs.add(addr)
                                 continue
                             # Local variable
-                            #print("symbol " + symbol.name)
-                            # Old gdb.Type doesn't have attribute 'name'
+                            #print("Processing symbol " + symbol.name)
                             type = symbol.type
                             type_name = get_typename(type, symbol.name)
                             if not type_name:
+                                #print("symbol " + symbol.name + " has no type name")
                                 continue
                             # Convert to gdb.Value
                             v = symbol2value(symbol, frame)
+                            if v is None or v.address is None:
+                                if symbol.name == "this":
+                                    print("symbol2value fails for symbol " + symbol.name)
+                                continue
+                            addr = long(v.address)
+                            if addr in all_addrs:
+                                continue
+                            all_addrs.add(addr)
                             visited_values = set()
                             sz, cnt = heap_usage_value(symbol.name, v, visited_values)
-                            print("\t" + "symbol=" + symbol.name + " type=" + type_name + " size=" + str(type.sizeof) \
+                            total_bytes += sz
+                            total_count += cnt
+                            print("\t" + "symbol=" + symbol.name + " type=" + type_name \
+                                + " size=" + str(type.sizeof) \
                                 + " heap=" + str(sz) + " count=" + str(cnt))
                         block = block.superblock
                 except Exception as e:
@@ -248,19 +289,26 @@ class PrintTopVariableCommand(gdb.Command):
         print("Global Vars")
         sorted_gvs = sorted(gvs, key=lambda gv: gv[0].symtab.filename)
         scopes = set()
-        for (symbol, value) in sorted_gvs:
+        for (symbol, v) in sorted_gvs:
             type = symbol.type
             type_name = get_typename(type, symbol.name)
+            if not type_name:
+                #print("get_typename failed for: " + symbol.name)
+                continue
             if symbol.symtab.filename not in scopes:
+                # print file name once
                 scopes.add(symbol.symtab.filename)
                 print("\t" + symbol.symtab.filename + ":")
             visited_values = set()
-            sz, cnt = heap_usage_value(symbol.name, value, visited_values)
-            if sz is None or cnt is None:
-                print("\t\t" + "symbol=" + symbol.name + " type=" + type_name + " FAIL")
-                continue
-            print("\t\t" + "symbol=" + symbol.name + " type=" + type_name + " size=" + str(type.sizeof) \
+            #print("processing " + symbol.name)
+            sz, cnt = heap_usage_value(symbol.name, v, visited_values)
+            total_bytes += sz
+            total_count += cnt
+            print("\t\t" + "symbol=" + symbol.name + " type=" + type_name \
+                + " size=" + str(type.sizeof) \
                 + " heap=" + str(sz) + " count=" + str(cnt))
+        # Print summary
+        print("Total heap usage: " + str(total_bytes) + " count: " + str(total_count))
 
     def invoke(self, argument, from_tty):
         print("Find variables with most memory consumption")

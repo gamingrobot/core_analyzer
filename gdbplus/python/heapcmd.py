@@ -14,12 +14,11 @@ except ImportError as e:
 
 type_code_des = {
   gdb.TYPE_CODE_PTR: 'gdb.TYPE_CODE_PTR',
-  gdb.TYPE_CODE_PTR: 'gdb.TYPE_CODE_ARRAY',
+  gdb.TYPE_CODE_ARRAY: 'gdb.TYPE_CODE_ARRAY',
   gdb.TYPE_CODE_STRUCT: 'gdb.TYPE_CODE_STRUCT',
   gdb.TYPE_CODE_UNION: 'gdb.TYPE_CODE_UNION',
   gdb.TYPE_CODE_ENUM: 'gdb.TYPE_CODE_ENUM',
   gdb.TYPE_CODE_FLAGS: 'gdb.TYPE_CODE_FLAGS',
-  gdb.TYPE_CODE_FUNC: 'gdb.TYPE_CODE_FUNC',
   gdb.TYPE_CODE_FUNC: 'gdb.TYPE_CODE_FUNC',
   gdb.TYPE_CODE_FLT: 'gdb.TYPE_CODE_FLT',
   gdb.TYPE_CODE_VOID: 'gdb.TYPE_CODE_VOID',
@@ -40,9 +39,9 @@ type_code_des = {
   gdb.TYPE_CODE_INTERNAL_FUNCTION: 'gdb.TYPE_CODE_INTERNAL_FUNCTION',
 }
 
-def heap_usage_value(name, value, visited_values):
+def heap_usage_value(name, value, visited_values, blk_addrs):
     #print("Enter heap_usage_value: " + name)
-    if value is None:
+    if value is None or value.is_optimized_out:
         return 0, 0
     if value.address:
         parent_addr = long(value.address)
@@ -57,18 +56,22 @@ def heap_usage_value(name, value, visited_values):
     count = 0
 
     type = gdb.types.get_basic_type(value.type)
-    if type.code == gdb.TYPE_CODE_PTR:
+    if type.code == gdb.TYPE_CODE_PTR:  # what about gdb.TYPE_CODE_REF?
+        if type is not value.dynamic_type:
+           type = value.dynamic_type
+           value = value.cast(type)
         addr = long(value)
         #print(hex(addr))
         blk = gdb.heap_block(addr)
-        if blk and blk.inuse:
+        if blk and blk.inuse and blk.address not in blk_addrs:
+            blk_addrs.add(blk.address)
             size += blk.size
             count += 1
             #print("heap block " + hex(blk.address) + " size=" + str(blk.size))
             target_type = type.target()
             if target_type.sizeof >= 8:
                 v = value.referenced_value()
-                sz, cnt = heap_usage_value("*(" + name + ")", v, visited_values)
+                sz, cnt = heap_usage_value("*(" + name + ")", v, visited_values, blk_addrs)
                 size += sz
                 count += cnt
     elif type.code == gdb.TYPE_CODE_ARRAY:
@@ -79,7 +82,7 @@ def heap_usage_value(name, value, visited_values):
             v = value[i]
             if parent_addr == long(v.address):
                 visited_values.discard(parent_addr)
-            sz, cnt = heap_usage_value(name + '[' + str(i) + ']', v, visited_values)
+            sz, cnt = heap_usage_value(name + '[' + str(i) + ']', v, visited_values, blk_addrs)
             size += sz
             count += cnt
     elif type.code == gdb.TYPE_CODE_STRUCT:
@@ -90,13 +93,15 @@ def heap_usage_value(name, value, visited_values):
         #print(str(fieldnames))
         for member in fields:
             if not hasattr(member, "type"):
-                #print(name + "[" + member.name + "] has no type")
+                print(name + "[" + member.name + "] has no type")
                 continue
-            #if not hasattr(value, member.name):
-            #    print(name + "has no attr [" + member.name + "]")
-            #    continue
-            memval = value[member]
-            if not memval or not memval.address:
+            print("Extract field value: " + name + "[" + member.name + "]")
+            if member.is_base_class:
+                memval = value.cast(member.type)
+                #continue
+            else:
+                memval = value[member]
+            if memval is None or memval.address is None:
                 #print(name + "[" + member.name + "] has no value")
                 continue
             mtype = member.type
@@ -108,14 +113,15 @@ def heap_usage_value(name, value, visited_values):
                     or mtype.code == gdb.TYPE_CODE_STRUCT \
                     or mtype.code == gdb.TYPE_CODE_UNION \
                     or mtype.code == gdb.TYPE_CODE_TYPEDEF):
-                #print(name + "[" + member.name + "]" + " type.code=" + type_code_des[mtype.code])
+                #print(name + "[" + member.name + "]" + " type.code=" + type_code_des[mtype.code] \
+                #    + " type.name=" + str(mtype.tag))
                 if parent_addr == long(memval.address):
                     # first field of a struct has the same value.address as
                     # the struct itself, we have to remove it from the set
                     # TODO ensure the first data member is NOT a pointer and points
                     #      to the struct itself.
                     visited_values.discard(parent_addr)
-                sz, cnt = heap_usage_value(name + '[' + member.name + ']', memval, visited_values)
+                sz, cnt = heap_usage_value(name + '[' + member.name + ']', memval, visited_values, blk_addrs)
                 size += sz
                 count += cnt
 
@@ -182,7 +188,8 @@ class PrintTopVariableCommand(gdb.Command):
                     print("gdb.lookup_global_symbol failed for: " + expr)
             if v:
                 visited_values = set()
-                sz, cnt = heap_usage_value(expr, v, visited_values)
+                blk_addrs = set()
+                sz, cnt = heap_usage_value(expr, v, visited_values, blk_addrs)
                 type = v.type
                 type_name = get_typename(type, expr)
                 print("expr=" + expr + " type=" + type_name + " size=" + str(type.sizeof) \
@@ -218,6 +225,7 @@ class PrintTopVariableCommand(gdb.Command):
                     if not fname:
                         fname = "??"
                     print("frame [" + str(i) + "] " + fname)
+                    symbol_names = set()
                     # Traverse all blocks
                     try:
                         # this method may throw if there is no debugging info in the block
@@ -229,10 +237,13 @@ class PrintTopVariableCommand(gdb.Command):
                         # Traverse all symbols in the block
                         for symbol in block:
                             #print("symbol " + symbol.name)
-                            # Ignore other symbols except variables
-                            if not symbol.is_variable and not symbol.is_argument:
+                            # Ignore other symbols, for example, argument, except variables
+                            if not symbol.is_variable:
                                 #print("symbol [" + symbol.name + "]" + " is not var or arg")
                                 continue
+                            if symbol.name in symbol_names:
+                                continue
+                            symbol_names.add(symbol.name)
                             #if not symbol.is_valid():
                             #    continue
                             #if symbol.addr_class == gdb.SYMBOL_LOC_OPTIMIZED_OUT:
@@ -240,7 +251,7 @@ class PrintTopVariableCommand(gdb.Command):
                             #if not symbol.type:
                             #    continue
                             # Global symbols are processed later
-                            elif block.is_global or block.is_static:
+                            if block.is_global or block.is_static:
                                 v = symbol2value(symbol, frame)
                                 if v and v.address:
                                     addr = long(v.address)
@@ -258,16 +269,20 @@ class PrintTopVariableCommand(gdb.Command):
                                 continue
                             # Convert to gdb.Value
                             v = symbol2value(symbol, frame)
-                            if v is None or v.address is None:
-                                if symbol.name == "this":
-                                    print("symbol2value fails for symbol " + symbol.name)
+                            if v is None:
+                                #if symbol.name == "this":
+                                #    print("symbol2value fails for symbol " + symbol.name)
                                 continue
-                            addr = long(v.address)
-                            if addr in all_addrs:
-                                continue
-                            all_addrs.add(addr)
+                            # Skip variable that has been processed previously
+                            # register variable has no address, however.
+                            if v.address is not None:
+                                addr = long(v.address)
+                                if addr in all_addrs:
+                                    continue
+                                all_addrs.add(addr)
                             visited_values = set()
-                            sz, cnt = heap_usage_value(symbol.name, v, visited_values)
+                            blk_addrs = set()
+                            sz, cnt = heap_usage_value(symbol.name, v, visited_values, blk_addrs)
                             total_bytes += sz
                             total_count += cnt
                             print("\t" + "symbol=" + symbol.name + " type=" + type_name \
@@ -300,8 +315,9 @@ class PrintTopVariableCommand(gdb.Command):
                 scopes.add(symbol.symtab.filename)
                 print("\t" + symbol.symtab.filename + ":")
             visited_values = set()
+            blk_addrs = set()
             #print("processing " + symbol.name)
-            sz, cnt = heap_usage_value(symbol.name, v, visited_values)
+            sz, cnt = heap_usage_value(symbol.name, v, visited_values, blk_addrs)
             total_bytes += sz
             total_count += cnt
             print("\t\t" + "symbol=" + symbol.name + " type=" + type_name \

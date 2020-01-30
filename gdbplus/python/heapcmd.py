@@ -322,7 +322,7 @@ class PrintTopVariableCommand(gdb.Command):
             #print("processing " + symbol.name)
             sz, cnt = heap_usage_value(symbol.name, v, blk_addrs)
             if sz and cnt:
-                id = "global " + symbol.name
+                id = symbol.symtab.filename + " " + symbol.name
                 all_results.append((id, sz, cnt))
                 total_bytes += sz
                 total_count += cnt

@@ -41,7 +41,8 @@ type_code_des = {
   gdb.TYPE_CODE_INTERNAL_FUNCTION: 'gdb.TYPE_CODE_INTERNAL_FUNCTION',
 }
 
-def heap_usage_value(name, value, unique_value_addrs, blk_addrs):
+def heap_usage_value(name, value, blk_addrs):
+    unique_value_addrs = set()
     values = deque()
     values.append((name, value))
     size = 0
@@ -188,9 +189,8 @@ class PrintTopVariableCommand(gdb.Command):
                 else:
                     print("gdb.lookup_global_symbol failed for: " + expr)
             if v:
-                visited_values = set()
                 blk_addrs = set()
-                sz, cnt = heap_usage_value(expr, v, visited_values, blk_addrs)
+                sz, cnt = heap_usage_value(expr, v, blk_addrs)
                 type = v.type
                 type_name = get_typename(type, expr)
                 print("expr=" + expr + " type=" + type_name + " size=" + str(type.sizeof) \
@@ -199,8 +199,8 @@ class PrintTopVariableCommand(gdb.Command):
                 print("gdb.parse_and_eval failed for: " + expr)
 
     def calc_all_vars(self):
-        all_addrs = set()
-        gv_addrs = set()
+        unique_value_addrs = set()
+        blk_addrs = set()
         gvs = []
         total_bytes = 0
         total_count = 0
@@ -256,10 +256,9 @@ class PrintTopVariableCommand(gdb.Command):
                                 v = symbol2value(symbol, frame)
                                 if v and v.address:
                                     addr = long(v.address)
-                                    if addr not in gv_addrs:
-                                        gv_addrs.add(addr)
+                                    if addr not in unique_value_addrs:
+                                        unique_value_addrs.add(addr)
                                         gvs.append((symbol, v))
-                                    all_addrs.add(addr)
                                 continue
                             # Local variable
                             #print("Processing symbol " + symbol.name)
@@ -278,12 +277,10 @@ class PrintTopVariableCommand(gdb.Command):
                             # register variable has no address, however.
                             if v.address is not None:
                                 addr = long(v.address)
-                                if addr in all_addrs:
+                                if addr in unique_value_addrs:
                                     continue
-                                all_addrs.add(addr)
-                            visited_values = set()
-                            blk_addrs = set()
-                            sz, cnt = heap_usage_value(symbol.name, v, visited_values, blk_addrs)
+                                unique_value_addrs.add(addr)
+                            sz, cnt = heap_usage_value(symbol.name, v, blk_addrs)
                             total_bytes += sz
                             total_count += cnt
                             print("\t" + "symbol=" + symbol.name + " type=" + type_name \
@@ -315,10 +312,8 @@ class PrintTopVariableCommand(gdb.Command):
                 # print file name once
                 scopes.add(symbol.symtab.filename)
                 print("\t" + symbol.symtab.filename + ":")
-            visited_values = set()
-            blk_addrs = set()
             #print("processing " + symbol.name)
-            sz, cnt = heap_usage_value(symbol.name, v, visited_values, blk_addrs)
+            sz, cnt = heap_usage_value(symbol.name, v, blk_addrs)
             total_bytes += sz
             total_count += cnt
             print("\t\t" + "symbol=" + symbol.name + " type=" + type_name \

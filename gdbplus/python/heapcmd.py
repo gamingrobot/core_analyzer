@@ -99,7 +99,7 @@ def heap_usage_value(name, value, unique_value_addrs, blk_addrs):
                 if not hasattr(m, "type"):
                     print(name + "[" + m.name + "] has no type")
                     continue
-                print("Extract field value: " + name + "[" + m.name + "]")
+                #print("Extract field value: " + name + "[" + str(m.name) + "]")
                 if m.is_base_class:
                     memval = value.cast(m.type)
                 else:
@@ -124,7 +124,7 @@ def heap_usage_value(name, value, unique_value_addrs, blk_addrs):
                         # TODO ensure the first data member is NOT a pointer and points
                         #      to the struct itself.
                         unique_value_addrs.discard(parent_addr)
-                    values.append((name + '[' + m.name + ']', memval))
+                    values.append((name + '[' + str(m.name) + ']', memval))
 
     return size, count
 
@@ -211,8 +211,8 @@ class PrintTopVariableCommand(gdb.Command):
         print("There are totally " + str(num_threads) + " threads")
         # Traverse all threads
         for thread in gdb.inferiors()[0].threads():
-            if thread.num != 4:
-                continue
+            #if thread.num != 4:
+            #    continue
             # Switch to current thread
             thread.switch()
             print("Thread " + str(thread.num))

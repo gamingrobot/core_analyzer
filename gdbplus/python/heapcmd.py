@@ -7,6 +7,8 @@
 import argparse
 import traceback
 import json
+from collections import deque
+
 try:
     import gdb
 except ImportError as e:
@@ -39,91 +41,90 @@ type_code_des = {
   gdb.TYPE_CODE_INTERNAL_FUNCTION: 'gdb.TYPE_CODE_INTERNAL_FUNCTION',
 }
 
-def heap_usage_value(name, value, visited_values, blk_addrs):
-    #print("Enter heap_usage_value: " + name)
-    if value is None or value.is_optimized_out:
-        return 0, 0
-    if value.address:
-        parent_addr = long(value.address)
-        if parent_addr in visited_values:
-            #print("heap_usage_value value is repeated: " + name)
-            return 0, 0
-        visited_values.add(parent_addr)
-    '''
-    Given a gdb.Value object, return the aggregated heap memory usage reachable by this variable
-    '''
+def heap_usage_value(name, value, unique_value_addrs, blk_addrs):
+    values = deque()
+    values.append((name, value))
     size = 0
     count = 0
 
-    type = gdb.types.get_basic_type(value.type)
-    if type.code == gdb.TYPE_CODE_PTR:  # what about gdb.TYPE_CODE_REF?
-        if type is not value.dynamic_type:
-           type = value.dynamic_type
-           value = value.cast(type)
-        addr = long(value)
-        #print(hex(addr))
-        blk = gdb.heap_block(addr)
-        if blk and blk.inuse and blk.address not in blk_addrs:
-            blk_addrs.add(blk.address)
-            size += blk.size
-            count += 1
-            #print("heap block " + hex(blk.address) + " size=" + str(blk.size))
-            target_type = type.target()
-            if target_type.sizeof >= 8:
-                v = value.referenced_value()
-                sz, cnt = heap_usage_value("*(" + name + ")", v, visited_values, blk_addrs)
-                size += sz
-                count += cnt
-    elif type.code == gdb.TYPE_CODE_ARRAY:
-        istart, iend = type.range()
-        #ptr_to_elt_type = type.target().target().pointer()
-        #ptr_to_first = value.cast(ptr_to_elt_type)
-        for i in range(istart, iend+1):
-            v = value[i]
-            if parent_addr == long(v.address):
-                visited_values.discard(parent_addr)
-            sz, cnt = heap_usage_value(name + '[' + str(i) + ']', v, visited_values, blk_addrs)
-            size += sz
-            count += cnt
-    elif type.code == gdb.TYPE_CODE_STRUCT:
-        fields = type.fields()
-        #fieldnames = []
-        #for m in fields:
-        #    fieldnames.append(m.name)
-        #print(str(fieldnames))
-        for member in fields:
-            if not hasattr(member, "type"):
-                print(name + "[" + member.name + "] has no type")
+    # Traverse all nested data members of the value (DFS)
+    while values:
+        (name, value) = values.pop()
+        #print("Evaluate value: " + name)
+        if value is None or value.is_optimized_out:
+            continue
+        parent_addr = None
+        if value.address:
+            parent_addr = long(value.address)
+            if parent_addr in unique_value_addrs:
+                #print("Value is repeated: " + name)
                 continue
-            print("Extract field value: " + name + "[" + member.name + "]")
-            if member.is_base_class:
-                memval = value.cast(member.type)
-                #continue
-            else:
-                memval = value[member]
-            if memval is None or memval.address is None:
-                #print(name + "[" + member.name + "] has no value")
-                continue
-            mtype = member.type
-            if mtype.sizeof >= 8 \
-                and (mtype.code == gdb.TYPE_CODE_PTR \
-                    or mtype.code == gdb.TYPE_CODE_REF \
-                    #or mtype.code == gdb.TYPE_CODE_RVALUE_REF \
-                    or mtype.code == gdb.TYPE_CODE_ARRAY \
-                    or mtype.code == gdb.TYPE_CODE_STRUCT \
-                    or mtype.code == gdb.TYPE_CODE_UNION \
-                    or mtype.code == gdb.TYPE_CODE_TYPEDEF):
-                #print(name + "[" + member.name + "]" + " type.code=" + type_code_des[mtype.code] \
-                #    + " type.name=" + str(mtype.tag))
-                if parent_addr == long(memval.address):
-                    # first field of a struct has the same value.address as
-                    # the struct itself, we have to remove it from the set
-                    # TODO ensure the first data member is NOT a pointer and points
-                    #      to the struct itself.
-                    visited_values.discard(parent_addr)
-                sz, cnt = heap_usage_value(name + '[' + member.name + ']', memval, visited_values, blk_addrs)
-                size += sz
-                count += cnt
+            unique_value_addrs.add(parent_addr)
+        '''
+        Given a gdb.Value object, return the aggregated heap memory usage reachable through it
+        '''
+        type = gdb.types.get_basic_type(value.type)
+        if type.code == gdb.TYPE_CODE_PTR:  # what about gdb.TYPE_CODE_REF?
+            if type is not value.dynamic_type:
+                type = value.dynamic_type
+                value = value.cast(type)
+            addr = long(value)
+            #print("pointer value: " + hex(addr))
+            blk = gdb.heap_block(addr)
+            if blk and blk.inuse and (blk.address not in blk_addrs):
+                blk_addrs.add(blk.address)
+                size += blk.size
+                count += 1
+                #print("heap block " + hex(blk.address) + " size=" + str(blk.size))
+                target_type = type.target()
+                if target_type.sizeof >= 8:
+                    v = value.referenced_value()
+                    values.append(("*(" + name + ")", v))
+        elif type.code == gdb.TYPE_CODE_ARRAY:
+            istart, iend = type.range()
+            #ptr_to_elt_type = type.target().target().pointer()
+            #ptr_to_first = value.cast(ptr_to_elt_type)
+            for i in range(istart, iend+1):
+                v = value[i]
+                if parent_addr and parent_addr == long(v.address):
+                    unique_value_addrs.discard(parent_addr)
+                values.append((name + '[' + str(i) + ']', v))
+        elif type.code == gdb.TYPE_CODE_STRUCT:
+            fields = type.fields()
+            #fieldnames = []
+            #for m in fields:
+            #    fieldnames.append(m.name)
+            #print(str(fieldnames))
+            for m in fields:
+                if not hasattr(m, "type"):
+                    print(name + "[" + m.name + "] has no type")
+                    continue
+                print("Extract field value: " + name + "[" + m.name + "]")
+                if m.is_base_class:
+                    memval = value.cast(m.type)
+                else:
+                    memval = value[m]
+                if memval is None or memval.address is None:
+                    #print(name + "[" + m.name + "] has no value")
+                    continue
+                mtype = m.type
+                if mtype.sizeof >= 8 \
+                    and (mtype.code == gdb.TYPE_CODE_PTR \
+                        or mtype.code == gdb.TYPE_CODE_REF \
+                        #or mtype.code == gdb.TYPE_CODE_RVALUE_REF \
+                        or mtype.code == gdb.TYPE_CODE_ARRAY \
+                        or mtype.code == gdb.TYPE_CODE_STRUCT \
+                        or mtype.code == gdb.TYPE_CODE_UNION \
+                        or mtype.code == gdb.TYPE_CODE_TYPEDEF):
+                    #print(name + "[" + member.name + "]" + " type.code=" + type_code_des[mtype.code] \
+                    #    + " type.name=" + str(mtype.tag))
+                    if parent_addr and parent_addr == long(memval.address):
+                        # first field of a struct has the same value.address as
+                        # the struct itself, we have to remove it from the set
+                        # TODO ensure the first data member is NOT a pointer and points
+                        #      to the struct itself.
+                        unique_value_addrs.discard(parent_addr)
+                    values.append((name + '[' + m.name + ']', memval))
 
     return size, count
 

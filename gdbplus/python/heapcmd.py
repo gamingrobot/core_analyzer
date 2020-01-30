@@ -319,8 +319,14 @@ class PrintTopVariableCommand(gdb.Command):
                 # print file name once
                 scopes.add(symbol.symtab.filename)
                 print("\t" + symbol.symtab.filename + ":")
+
             #print("processing " + symbol.name)
-            sz, cnt = heap_usage_value(symbol.name, v, blk_addrs)
+            try:
+                sz, cnt = heap_usage_value(symbol.name, v, blk_addrs)
+            except Exception as e:
+                    print("Exception: " + str(e))
+                    traceback.print_exc()
+
             if sz and cnt:
                 id = symbol.symtab.filename + " " + symbol.name
                 all_results.append((id, sz, cnt))

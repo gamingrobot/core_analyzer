@@ -163,7 +163,9 @@ class PrintTopVariableCommand(gdb.Command):
     '''
     _command = "topvars"
     _cfthreadno = 0
-    
+    _show_count = 20
+    _verbose = False
+
     def __init__(self):
         gdb.Command.__init__(self, self._command, gdb.COMMAND_STACK)
 
@@ -202,6 +204,7 @@ class PrintTopVariableCommand(gdb.Command):
         unique_value_addrs = set()
         blk_addrs = set()
         gvs = []
+        all_results = []
         total_bytes = 0
         total_count = 0
         # Remember previous selected thread (may be None)
@@ -281,11 +284,15 @@ class PrintTopVariableCommand(gdb.Command):
                                     continue
                                 unique_value_addrs.add(addr)
                             sz, cnt = heap_usage_value(symbol.name, v, blk_addrs)
-                            total_bytes += sz
-                            total_count += cnt
-                            print("\t" + "symbol=" + symbol.name + " type=" + type_name \
-                                + " size=" + str(type.sizeof) \
-                                + " heap=" + str(sz) + " count=" + str(cnt))
+                            if sz and cnt:
+                                id = "thread " + str(thread.num) + " frame [" + str(i) + "] " + symbol.name
+                                all_results.append((id, sz, cnt))
+                                total_bytes += sz
+                                total_count += cnt
+                            if self._verbose:
+                                print("\t" + "symbol=" + symbol.name + " type=" + type_name \
+                                    + " size=" + str(type.sizeof) \
+                                    + " heap=" + str(sz) + " count=" + str(cnt))
                         block = block.superblock
                 except Exception as e:
                     print("Exception: " + str(e))
@@ -314,11 +321,24 @@ class PrintTopVariableCommand(gdb.Command):
                 print("\t" + symbol.symtab.filename + ":")
             #print("processing " + symbol.name)
             sz, cnt = heap_usage_value(symbol.name, v, blk_addrs)
-            total_bytes += sz
-            total_count += cnt
-            print("\t\t" + "symbol=" + symbol.name + " type=" + type_name \
-                + " size=" + str(type.sizeof) \
-                + " heap=" + str(sz) + " count=" + str(cnt))
+            if sz and cnt:
+                id = "global " + symbol.name
+                all_results.append((id, sz, cnt))
+                total_bytes += sz
+                total_count += cnt
+            if self._verbose:
+                print("\t\t" + "symbol=" + symbol.name + " type=" + type_name \
+                    + " size=" + str(type.sizeof) \
+                    + " heap=" + str(sz) + " count=" + str(cnt))
+        # Sort results by top n size and cnt
+        sorted_results = sorted(all_results, key=lambda elem: elem[1], reverse = True)
+        i = 0
+        print("===================================================")
+        for var in sorted_results:
+            print("[" + str(i) + "] " + var[0] + " size=" + str(var[1]) + " count=" + str(var[2]))
+            i += 1
+            if i > self._show_count:
+                break
         # Print summary
         print("Total heap usage: " + str(total_bytes) + " count: " + str(total_count))
 

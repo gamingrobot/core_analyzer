@@ -41,6 +41,39 @@ type_code_des = {
   gdb.TYPE_CODE_INTERNAL_FUNCTION: 'gdb.TYPE_CODE_INTERNAL_FUNCTION',
 }
 
+def gvs():
+    # Get all global data segments
+    segments = []
+    out = gdb.execute("segment", to_string=True)
+    lines = out.splitlines()
+    for line in lines:
+        if '.data/.bss' not in line:
+            continue
+        tokens = line.split()
+        start_addr = tokens[1][1:]
+        end_addr = tokens[3][:-1]
+        #print(start_addr + " " + end_addr)
+        segments.append((int(start_addr, 16), int(end_addr, 16)))
+    # Traverse all global segment for gvs
+    for (start, end) in segments:
+        addr = start
+        while addr < end:
+            block = gdb.block_for_pc(addr)
+            if block and block.is_valid():
+                addr = block.end
+                while block:
+                    if block.is_global or block.is_static:
+                        # Traverse all symbols in the block
+                        for symbol in block:
+                            print("symbol " + symbol.name)
+                            if symbol.is_variable:
+                                print("gv [" + symbol.name + "]")
+                                continue
+                    block = block.superblock
+            else:
+                addr += 8
+
+
 def heap_usage_value(name, value, blk_addrs):
     unique_value_addrs = set()
     values = deque()

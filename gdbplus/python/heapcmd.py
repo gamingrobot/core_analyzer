@@ -44,7 +44,7 @@ type_code_des = {
 def gvs():
     # Get all global data segments
     # [   0] [0x622000 - 0x623000]      4K  rw- [.data/.bss] [/Linux/bin/MSTRSvr]
-    segments = []
+    segments = [] 
     out = gdb.execute("segment", to_string=True)
     lines = out.splitlines()
     for line in lines:
@@ -57,28 +57,38 @@ def gvs():
             tokens = line[start+1:end].split()
             start_addr = tokens[0]
             end_addr = tokens[2]
-            print(start_addr + " " + end_addr)
+            #print(start_addr + " " + end_addr)
             segments.append((int(start_addr, 16), int(end_addr, 16)))
-    return
     # Traverse all global segment for gvs
-    for (start, end) in segments:
+    print("segment count: " + str(len(segments)))
+    for seg in segments:
+        start = seg[0]
+        end = seg[1]
+        print(hex(start) + " " + hex(end))
         addr = start
         while addr < end:
-            block = gdb.block_for_pc(addr)
-            if block and block.is_valid():
-                addr = block.end
-                while block:
-                    if block.is_global or block.is_static:
-                        # Traverse all symbols in the block
-                        for symbol in block:
-                            print("symbol " + symbol.name)
-                            if symbol.is_variable:
-                                print("gv [" + symbol.name + "]")
-                                continue
-                    block = block.superblock
+            try:
+                print("call gdb.block_for_pc(" + hex(addr) + ")")
+                block = gdb.block_for_pc(addr)
+                #block = gdb.current_progspace().block_for_pc(addr)
+                if block and block.is_valid():
+                    next = block.end
+                    while block:
+                        if block.is_global or block.is_static:
+                            # Traverse all symbols in the block
+                            for symbol in block:
+                                print("symbol " + symbol.name)
+                                if symbol.is_variable:
+                                    print("gv [" + symbol.name + "]")
+                        block = block.superblock
+                else:
+                    next = addr + 8
+            except Exception as e:
+                traceback.print_exc()
+            if next > addr:
+                addr = next
             else:
                 addr += 8
-
 
 def heap_usage_value(name, value, blk_addrs):
     unique_value_addrs = set()

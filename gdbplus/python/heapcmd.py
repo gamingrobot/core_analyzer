@@ -43,17 +43,23 @@ type_code_des = {
 
 def gvs():
     # Get all global data segments
+    # [   0] [0x622000 - 0x623000]      4K  rw- [.data/.bss] [/Linux/bin/MSTRSvr]
     segments = []
     out = gdb.execute("segment", to_string=True)
     lines = out.splitlines()
     for line in lines:
         if '.data/.bss' not in line:
             continue
-        tokens = line.split()
-        start_addr = tokens[1][1:]
-        end_addr = tokens[3][:-1]
-        #print(start_addr + " " + end_addr)
-        segments.append((int(start_addr, 16), int(end_addr, 16)))
+        cursor = line.find("[")
+        start = line.find("[", cursor + 1)
+        end = line.find("]", start)
+        if start and end:
+            tokens = line[start+1:end].split()
+            start_addr = tokens[0]
+            end_addr = tokens[2]
+            print(start_addr + " " + end_addr)
+            segments.append((int(start_addr, 16), int(end_addr, 16)))
+    return
     # Traverse all global segment for gvs
     for (start, end) in segments:
         addr = start

@@ -41,27 +41,29 @@ type_code_des = {
   gdb.TYPE_CODE_INTERNAL_FUNCTION: 'gdb.TYPE_CODE_INTERNAL_FUNCTION',
 }
 
-def gvs():
-    addr = 0x7fc2ff31f978
+'''
+Given target address, query for gv that contains this address
+'''
+def lookup_gv(addr):
     try:
         line = gdb.execute("info symbol " + str(addr), to_string=True)
         tokens = line.split()
         if tokens and tokens[0]:
             gv_name = tokens[0]
-            print(gv_name)
             sym = gdb.lookup_global_symbol(gv_name, gdb.SYMBOL_VAR_DOMAIN)
             #if sym is None:
             #    sym = gdb.lookup_static_symbol(gv_name, gdb.SYMBOL_VARIABLES_DOMAIN)
             if sym:
-                print("symbol name=" + sym.name + " type=" + \
-                    str(get_typename(sym.type, sym.name)) + \
-                    " size=" + str(sym.type.sizeof))
+                return gv_name, symbol2value(sym)
+                #print("symbol name=" + sym.name + " type=" + \
+                #    str(get_typename(sym.type, sym.name)) + \
+                #    " size=" + str(sym.type.sizeof))
     except Exception as e:
         print("Exception: " + str(e))
         traceback.print_exc()
-    print("exit now..")
-    return
- 
+    return None
+
+def gvs():
     # Get all global data segments
     # [   0] [0x622000 - 0x623000]      4K  rw- [.data/.bss] [/Linux/bin/MSTRSvr]
     segments = [] 
@@ -87,26 +89,16 @@ def gvs():
         print(hex(start) + " " + hex(end))
         addr = start
         while addr < end:
-            try:
-                print("call gdb.block_for_pc(" + hex(addr) + ")")
-                block = gdb.block_for_pc(addr)
-                #block = gdb.current_progspace().block_for_pc(addr)
-                if block and block.is_valid():
-                    next = block.end
-                    while block:
-                        if block.is_global or block.is_static:
-                            # Traverse all symbols in the block
-                            for symbol in block:
-                                print("symbol " + symbol.name)
-                                if symbol.is_variable:
-                                    print("gv [" + symbol.name + "]")
-                        block = block.superblock
-                else:
-                    next = addr + 8
-            except Exception as e:
-                traceback.print_exc()
+            name, val = lookup_gv(addr)
+            if val is not None:
+                print("gv: " + name + " @" + hex(val.address))
+                type = val.type
+                next = val.address + type.sizeof
+            else:
+                next = addr + 8
+            # Move the query address to the next 8-byte aligned value
             if next > addr:
-                addr = next
+                addr = (next + 7) & (~7)
             else:
                 addr += 8
 

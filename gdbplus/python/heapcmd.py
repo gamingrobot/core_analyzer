@@ -53,15 +53,17 @@ def lookup_gv(addr):
             sym = gdb.lookup_global_symbol(gv_name, gdb.SYMBOL_VAR_DOMAIN)
             #if sym is None:
             #    sym = gdb.lookup_static_symbol(gv_name, gdb.SYMBOL_VARIABLES_DOMAIN)
-            if sym:
-                return gv_name, symbol2value(sym)
-                #print("symbol name=" + sym.name + " type=" + \
-                #    str(get_typename(sym.type, sym.name)) + \
-                #    " size=" + str(sym.type.sizeof))
+            if sym and sym.type and sym.type.sizeof:
+                print("symbol=" + sym.name + \
+                    " type=" + str(get_typename(sym.type, sym.name)) + \
+                    " size=" + str(sym.type.sizeof))
+                #gdb.execute("print " + gv_name)
+                val = symbol2value(sym, None)
+                return gv_name, val
     except Exception as e:
         print("Exception: " + str(e))
         traceback.print_exc()
-    return None
+    return None, None
 
 def gvs():
     # Get all global data segments
@@ -89,6 +91,7 @@ def gvs():
         print(hex(start) + " " + hex(end))
         addr = start
         while addr < end:
+            #print("\t" + hex(addr))
             name, val = lookup_gv(addr)
             if val is not None:
                 print("gv: " + name + " @" + hex(val.address))
@@ -194,16 +197,16 @@ def symbol2value(symbol, frame=None):
     '''
     Given a gdb.Symbol object, return the corresponding gdb.Value object
     '''
-    if not symbol.is_valid():
-        return None
     try:
-        if frame:
-            return symbol.value(frame)
-        else:
-            return symbol.value()
+        if symbol.is_valid() and symbol.is_variable:
+            if frame is not None:
+                return symbol.value(frame)
+            else:
+                return symbol.value()
     except Exception as e:
         print("Failed symbol.value: " + str(e))
         return None
+    return None
 
 def get_typename(type, expr):
     type_name = type.tag

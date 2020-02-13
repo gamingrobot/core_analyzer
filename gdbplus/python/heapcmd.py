@@ -54,16 +54,16 @@ def lookup_gv(addr):
             #if sym is None:
             #    sym = gdb.lookup_static_symbol(gv_name, gdb.SYMBOL_VARIABLES_DOMAIN)
             if sym and sym.type and sym.type.sizeof:
-                print("symbol=" + sym.name + \
-                    " type=" + str(get_typename(sym.type, sym.name)) + \
-                    " size=" + str(sym.type.sizeof))
+                #print("symbol=" + sym.name + \
+                #    " type=" + str(get_typename(sym.type, sym.name)) + \
+                #    " size=" + str(sym.type.sizeof))
                 #gdb.execute("print " + gv_name)
-                val = symbol2value(sym, None)
-                return gv_name, val
+                val = symbol2value(sym)
+                return gv_name, sym, val
     except Exception as e:
         print("Exception: " + str(e))
         traceback.print_exc()
-    return None, None
+    return None, None, None
 
 def gvs():
     # Get all global data segments
@@ -88,15 +88,19 @@ def gvs():
     for seg in segments:
         start = seg[0]
         end = seg[1]
-        print(hex(start) + " " + hex(end))
+        #print(hex(start) + " " + hex(end))
         addr = start
         while addr < end:
             #print("\t" + hex(addr))
-            name, val = lookup_gv(addr)
+            name, sym, val = lookup_gv(addr)
             if val is not None:
-                print("gv: " + name + " @" + hex(val.address))
+                val_addr = long(val.address)
+                print("gv: " + name + " @" + hex(val_addr))
                 type = val.type
-                next = val.address + type.sizeof
+                next = val_addr + type.sizeof
+            elif sym is not None:
+                #print("failed to get gv: " + name)
+                next = addr + sym.type.sizeof
             else:
                 next = addr + 8
             # Move the query address to the next 8-byte aligned value

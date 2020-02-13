@@ -42,6 +42,26 @@ type_code_des = {
 }
 
 def gvs():
+    addr = 0x7fc2ff31f978
+    try:
+        line = gdb.execute("info symbol " + str(addr), to_string=True)
+        tokens = line.split()
+        if tokens and tokens[0]:
+            gv_name = tokens[0]
+            print(gv_name)
+            sym = gdb.lookup_global_symbol(gv_name, gdb.SYMBOL_VAR_DOMAIN)
+            #if sym is None:
+            #    sym = gdb.lookup_static_symbol(gv_name, gdb.SYMBOL_VARIABLES_DOMAIN)
+            if sym:
+                print("symbol name=" + sym.name + " type=" + \
+                    str(get_typename(sym.type, sym.name)) + \
+                    " size=" + str(sym.type.sizeof))
+    except Exception as e:
+        print("Exception: " + str(e))
+        traceback.print_exc()
+    print("exit now..")
+    return
+ 
     # Get all global data segments
     # [   0] [0x622000 - 0x623000]      4K  rw- [.data/.bss] [/Linux/bin/MSTRSvr]
     segments = [] 
@@ -346,7 +366,6 @@ class PrintTopVariableCommand(gdb.Command):
                 except Exception as e:
                     print("Exception: " + str(e))
                     traceback.print_exc()
-                    pass
                 frame = frame.older()
                 i += 1
             print("") #End of one thread

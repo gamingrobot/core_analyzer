@@ -65,7 +65,7 @@ def lookup_gv(addr):
         traceback.print_exc()
     return None, None, None
 
-def gvs():
+def segments():
     # Get all global data segments
     # [   0] [0x622000 - 0x623000]      4K  rw- [.data/.bss] [/Linux/bin/MSTRSvr]
     segments = [] 
@@ -83,9 +83,13 @@ def gvs():
             end_addr = tokens[2]
             #print(start_addr + " " + end_addr)
             segments.append((int(start_addr, 16), int(end_addr, 16)))
+    return segments
+
+def gvs():
+    segs = segments()
     # Traverse all global segment for gvs
-    print("segment count: " + str(len(segments)))
-    for seg in segments:
+    print("segment count: " + str(len(segs)))
+    for seg in segs:
         start = seg[0]
         end = seg[1]
         #print(hex(start) + " " + hex(end))
@@ -106,6 +110,28 @@ def gvs():
             # Move the query address to the next 8-byte aligned value
             if next > addr:
                 addr = (next + 7) & (~7)
+            else:
+                addr += 8
+
+def gvs2():
+    segs = segments()
+    # Traverse all global segment for gvs
+    print("segment count: " + str(len(segs)))
+    for (start, end) in segs:
+        addr = start
+        while addr < end:
+            block = gdb.block_for_pc(addr)
+            if block and block.is_valid():
+                addr = block.end
+                while block:
+                    if block.is_global or block.is_static:
+                        # Traverse all symbols in the block
+                        for symbol in block:
+                            print("symbol " + symbol.name)
+                            if symbol.is_variable:
+                                print("gv [" + symbol.name + "]")
+                                continue
+                    block = block.superblock
             else:
                 addr += 8
 

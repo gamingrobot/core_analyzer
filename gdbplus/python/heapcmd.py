@@ -85,10 +85,10 @@ def segments():
             segments.append((int(start_addr, 16), int(end_addr, 16)))
     return segments
 
-def gvs():
+def get_gvs():
     segs = segments()
+    gvs = []
     # Traverse all global segment for gvs
-    print("segment count: " + str(len(segs)))
     for seg in segs:
         start = seg[0]
         end = seg[1]
@@ -99,7 +99,8 @@ def gvs():
             name, sym, val = lookup_gv(addr)
             if val is not None:
                 val_addr = long(val.address)
-                print("gv: " + name + " @" + hex(val_addr))
+                #print("    " + name + " @" + hex(val_addr))
+                gvs.append((sym, val))
                 type = val.type
                 next = val_addr + type.sizeof
             elif sym is not None:
@@ -112,28 +113,21 @@ def gvs():
                 addr = (next + 7) & (~7)
             else:
                 addr += 8
+    return gvs
 
-def gvs2():
-    segs = segments()
-    # Traverse all global segment for gvs
-    print("segment count: " + str(len(segs)))
-    for (start, end) in segs:
-        addr = start
-        while addr < end:
-            block = gdb.block_for_pc(addr)
-            if block and block.is_valid():
-                addr = block.end
-                while block:
-                    if block.is_global or block.is_static:
-                        # Traverse all symbols in the block
-                        for symbol in block:
-                            print("symbol " + symbol.name)
-                            if symbol.is_variable:
-                                print("gv [" + symbol.name + "]")
-                                continue
-                    block = block.superblock
-            else:
-                addr += 8
+def print_gvs():
+    gvs = get_gvs()
+    sorted_gvs = sorted(gvs, key=lambda gv: gv[0].symtab.filename)
+    scopes = set()
+    for (symbol, v) in sorted_gvs:
+        type_name = get_typename(symbol.type, symbol.name)
+        if not type_name:
+            type_name = "<unknown>"
+        if symbol.symtab.filename not in scopes:
+            # print file name once
+            scopes.add(symbol.symtab.filename)
+            print(symbol.symtab.filename + ":")
+        print("    " + symbol.name + " type=" + type_name)
 
 def heap_usage_value(name, value, blk_addrs):
     unique_value_addrs = set()
@@ -350,12 +344,12 @@ class PrintTopVariableCommand(gdb.Command):
                             #    continue
                             # Global symbols are processed later
                             if block.is_global or block.is_static:
-                                v = symbol2value(symbol, frame)
-                                if v and v.address:
-                                    addr = long(v.address)
-                                    if addr not in unique_value_addrs:
-                                        unique_value_addrs.add(addr)
-                                        gvs.append((symbol, v))
+                                #v = symbol2value(symbol, frame)
+                                #if v and v.address:
+                                #    addr = long(v.address)
+                                #    if addr not in unique_value_addrs:
+                                #        unique_value_addrs.add(addr)
+                                #        gvs.append((symbol, v))
                                 continue
                             # Local variable
                             #print("Processing symbol " + symbol.name)
@@ -397,9 +391,11 @@ class PrintTopVariableCommand(gdb.Command):
         # Restore context
         orig_thread.switch() #End of all threads
 
+
         # print globals after all threads are visited
         print("")
         print("Global Vars")
+        gvs = get_gvs()
         sorted_gvs = sorted(gvs, key=lambda gv: gv[0].symtab.filename)
         scopes = set()
         for (symbol, v) in sorted_gvs:

@@ -85,14 +85,16 @@ def segments():
             segments.append((int(start_addr, 16), int(end_addr, 16)))
     return segments
 
-def get_gvs():
+def get_gvs(debug=False):
     segs = segments()
     gvs = []
     # Traverse all global segment for gvs
-    for seg in segs:
-        start = seg[0]
-        end = seg[1]
-        #print(hex(start) + " " + hex(end))
+    seg_cnt = len(segs)
+    i = 0
+    for (start, end) in segs:
+        i += 1
+        if debug:
+            print("[" + str(i) + "/" + str(seg_cnt) + "] " + hex(start) + " " + hex(end))
         addr = start
         while addr < end:
             #print("\t" + hex(addr))
@@ -116,7 +118,7 @@ def get_gvs():
     return gvs
 
 def print_gvs():
-    gvs = get_gvs()
+    gvs = get_gvs(True)
     sorted_gvs = sorted(gvs, key=lambda gv: gv[0].symtab.filename)
     scopes = set()
     for (symbol, v) in sorted_gvs:

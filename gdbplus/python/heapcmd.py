@@ -119,14 +119,10 @@ def get_gvs(debug=False):
 
 def get_gvs2(debug=False):
     gvs = []
-    addr = 0
+    global_symbols = gdb.global_symbols()
     # Traverse all global segment for gvs
-    while True:
-        symbol = gdb.global_var(addr)
-        if symbol is None:
-            break
-        addr += symbol.type.sizeof
-        val = symbol2value(sym)
+    for symbol in global_symbols:
+        val = symbol2value(symbol)
         if val is not None:
             val_addr = long(val.address)
             print("    " + symbol.name + " @" + hex(val_addr))

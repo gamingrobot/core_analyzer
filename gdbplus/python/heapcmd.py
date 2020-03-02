@@ -117,6 +117,22 @@ def get_gvs(debug=False):
                 addr += 8
     return gvs
 
+def get_gvs2(debug=False):
+    gvs = []
+    addr = 0
+    # Traverse all global segment for gvs
+    while True:
+        symbol = gdb.global_var(addr)
+        if symbol is None:
+            break
+        addr += symbol.type.sizeof
+        val = symbol2value(sym)
+        if val is not None:
+            val_addr = long(val.address)
+            print("    " + symbol.name + " @" + hex(val_addr))
+            gvs.append((symbol, val))
+    return gvs
+
 def print_gvs():
     gvs = get_gvs(True)
     sorted_gvs = sorted(gvs, key=lambda gv: gv[0].symtab.filename)

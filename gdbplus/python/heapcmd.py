@@ -196,10 +196,11 @@ def heap_usage_value(name, value, blk_addrs):
                     v = value.referenced_value()
                     values.append(("*(" + name + ")", v))
         elif type.code == gdb.TYPE_CODE_ARRAY:
-            istart, iend = type.range()
+            #istart, iend = type.range()
             #ptr_to_elt_type = type.target().target().pointer()
             #ptr_to_first = value.cast(ptr_to_elt_type)
-            for i in range(istart, iend+1):
+            array_size = type.sizeof / type.target().sizeof
+            for i in range(array_size):
                 v = value[i]
                 if parent_addr and parent_addr == long(v.address):
                     unique_value_addrs.discard(parent_addr)
@@ -217,8 +218,10 @@ def heap_usage_value(name, value, blk_addrs):
                 #print("Extract field value: " + name + "[" + str(m.name) + "]")
                 if m.is_base_class:
                     memval = value.cast(m.type)
+                elif m.name and hasattr(value, m.name):
+                    memval = value[m.name]
                 else:
-                    memval = value[m]
+                    memval = None
                 if memval is None or memval.address is None:
                     #print(name + "[" + m.name + "] has no value")
                     continue
@@ -332,7 +335,8 @@ class PrintTopVariableCommand(gdb.Command):
             #    continue
             # Switch to current thread
             thread.switch()
-            print("Thread " + str(thread.num))
+            if self._verbose:
+                print("Thread " + str(thread.num))
             # Traverse all frames starting with the innermost
             frame = gdb.newest_frame()
             i = 0
@@ -342,7 +346,8 @@ class PrintTopVariableCommand(gdb.Command):
                     fname = frame.name()
                     if not fname:
                         fname = "??"
-                    print("frame [" + str(i) + "] " + fname)
+                    if self._verbose:
+                        print("frame [" + str(i) + "] " + fname)
                     symbol_names = set()
                     # Traverse all blocks
                     try:
@@ -352,6 +357,10 @@ class PrintTopVariableCommand(gdb.Command):
                         block = None
                     # Traverse all syntactic blocks
                     while block:
+                        # Global symbols are processed later
+                        if block.is_global or block.is_static:
+                            # We have seen all function-level symbols
+                            break
                         # Traverse all symbols in the block
                         for symbol in block:
                             #print("symbol " + symbol.name)
@@ -368,16 +377,6 @@ class PrintTopVariableCommand(gdb.Command):
                             #    continue
                             #if not symbol.type:
                             #    continue
-                            # Global symbols are processed later
-                            if block.is_global or block.is_static:
-                                #v = symbol2value(symbol, frame)
-                                #if v and v.address:
-                                #    addr = long(v.address)
-                                #    if addr not in unique_value_addrs:
-                                #        unique_value_addrs.add(addr)
-                                #        gvs.append((symbol, v))
-                                continue
-                            # Local variable
                             #print("Processing symbol " + symbol.name)
                             type = symbol.type
                             type_name = get_typename(type, symbol.name)
@@ -413,15 +412,22 @@ class PrintTopVariableCommand(gdb.Command):
                     traceback.print_exc()
                 frame = frame.older()
                 i += 1
-            print("") #End of one thread
+            #End of one thread
         # Restore context
         orig_thread.switch() #End of all threads
 
-
         # print globals after all threads are visited
-        print("")
         print("Global Vars")
         gvs = get_gvs()
+        index = 0
+        for (symbol, v) in gvs:
+            addr = long(v.address)
+            if addr not in unique_value_addrs:
+                unique_value_addrs.add(addr)
+            else:
+                gvs.pop(index)
+            index += 1
+
         sorted_gvs = sorted(gvs, key=lambda gv: gv[0].symtab.filename)
         scopes = set()
         for (symbol, v) in sorted_gvs:
@@ -433,7 +439,7 @@ class PrintTopVariableCommand(gdb.Command):
             if symbol.symtab.filename not in scopes:
                 # print file name once
                 scopes.add(symbol.symtab.filename)
-                print("\t" + symbol.symtab.filename + ":")
+                #print("\t" + symbol.symtab.filename + ":")
 
             #print("processing " + symbol.name)
             try:

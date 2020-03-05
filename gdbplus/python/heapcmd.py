@@ -57,7 +57,6 @@ def lookup_gv(addr):
                 #print("symbol=" + sym.name + \
                 #    " type=" + str(get_typename(sym.type, sym.name)) + \
                 #    " size=" + str(sym.type.sizeof))
-                #gdb.execute("print " + gv_name)
                 val = symbol2value(sym)
                 return gv_name, sym, val
     except Exception as e:
@@ -65,7 +64,10 @@ def lookup_gv(addr):
         traceback.print_exc()
     return None, None, None
 
-def segments():
+'''
+List all segments of the target
+'''
+def data_segments():
     # Get all global data segments
     # [   0] [0x622000 - 0x623000]      4K  rw- [.data/.bss] [/Linux/bin/MSTRSvr]
     segments = [] 
@@ -85,8 +87,13 @@ def segments():
             segments.append((int(start_addr, 16), int(end_addr, 16)))
     return segments
 
+'''
+Return a list of all global variabls
+    This method is slow because it calls gdb `info symbol <addr>` command for every
+    possible address
+'''
 def get_gvs(debug=False):
-    segs = segments()
+    segs = data_segments()
     gvs = []
     # Traverse all global segment for gvs
     seg_cnt = len(segs)
@@ -97,43 +104,48 @@ def get_gvs(debug=False):
             print("[" + str(i) + "/" + str(seg_cnt) + "] " + hex(start) + " " + hex(end))
         addr = start
         while addr < end:
-            #print("\t" + hex(addr))
             name, sym, val = lookup_gv(addr)
-            if val is not None:
+            if val is not None and val.address is not None:
                 val_addr = long(val.address)
-                #print("    " + name + " @" + hex(val_addr))
                 gvs.append((sym, val))
-                type = val.type
-                next = val_addr + type.sizeof
+                next = val_addr + val.type.sizeof
             elif sym is not None:
                 #print("failed to get gv: " + name)
                 next = addr + sym.type.sizeof
             else:
                 next = addr + 8
-            # Move the query address to the next 8-byte aligned value
+            # Move the query address to the next 4-byte aligned value
             if next > addr:
-                addr = (next + 7) & (~7)
+                addr = (next + 3) & (~3)
             else:
                 addr += 8
     return gvs
 
-def get_gvs2(debug=False):
+'''
+Return a list of all global variabls
+   This is fast path which is supported by custom python method
+   gdb.global_and_static_symbols
+   However, this method may consume a large amount of memory because it extracts
+   all global variabls in one shot
+'''
+def get_gvs(debug=False):
     gvs = []
-    global_symbols = gdb.global_symbols()
+    global_symbols = gdb.global_and_static_symbols()
     # Traverse all global segment for gvs
     for symbol in global_symbols:
         val = symbol2value(symbol)
-        if val is not None:
-            val_addr = long(val.address)
-            print("    " + symbol.name + " @" + hex(val_addr))
+        if val is not None and val.address is not None:
             gvs.append((symbol, val))
+        elif debug:
+            print("Failed to get value for symbol: " + symbol.name)
     return gvs
 
 def print_gvs():
     gvs = get_gvs(True)
     sorted_gvs = sorted(gvs, key=lambda gv: gv[0].symtab.filename)
     scopes = set()
-    for (symbol, v) in sorted_gvs:
+    for (symbol, value) in sorted_gvs:
+        val_addr = long(value.address)
         type_name = get_typename(symbol.type, symbol.name)
         if not type_name:
             type_name = "<unknown>"
@@ -141,7 +153,7 @@ def print_gvs():
             # print file name once
             scopes.add(symbol.symtab.filename)
             print(symbol.symtab.filename + ":")
-        print("    " + symbol.name + " type=" + type_name)
+        print("    " + symbol.name + " type=" + type_name + " @" + hex(val_addr))
 
 def heap_usage_value(name, value, blk_addrs):
     unique_value_addrs = set()

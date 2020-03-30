@@ -1090,9 +1090,10 @@ static struct ca_arena* build_arena(address_t arena_vaddr, enum HEAP_TYPE type)
 					copy_mstate(&arena->mpState, &arena_state.mstate_2_4);
 				else if (glibc_ver_minor == 5)
 					copy_mstate(&arena->mpState, &arena_state.mstate_2_5);
-				else if (glibc_ver_minor >= 12 && glibc_ver_minor <= 21)
+                                //RHEL differs with other distros somehow
+				else if (glibc_ver_minor >= 12 && glibc_ver_minor <= 16)
 					copy_mstate(&arena->mpState, &arena_state.mstate_2_12);
-				else if (glibc_ver_minor >= 22 && glibc_ver_minor <= 27)
+				else if (glibc_ver_minor >= 17 && glibc_ver_minor <= 27)
 					copy_mstate(&arena->mpState, &arena_state.mstate_2_22);
 				else {
 					assert(0 && "internal error: glibc version not supported");
